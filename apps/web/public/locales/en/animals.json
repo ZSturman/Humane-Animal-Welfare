@@ -1,0 +1,110 @@
+{
+  "title": "Animals",
+  "search": {
+    "placeholder": "Search by name, ID, or microchip...",
+    "filters": "Filters",
+    "species": "Species",
+    "status": "Status",
+    "risk": "Risk Level",
+    "location": "Location",
+    "clearFilters": "Clear Filters"
+  },
+  "list": {
+    "empty": "No animals found matching your criteria.",
+    "loading": "Loading animals...",
+    "atRisk": "At Risk Animals",
+    "seniors": "Senior Animals",
+    "specialNeeds": "Special Needs",
+    "all": "All Animals"
+  },
+  "details": {
+    "profile": "Profile",
+    "medical": "Medical",
+    "behavioral": "Behavioral",
+    "history": "History",
+    "documents": "Documents",
+    "notes": "Notes"
+  },
+  "fields": {
+    "name": "Name",
+    "species": "Species",
+    "breed": "Breed",
+    "age": "Age",
+    "sex": "Sex",
+    "color": "Color",
+    "weight": "Weight",
+    "microchip": "Microchip",
+    "intakeDate": "Intake Date",
+    "daysInShelter": "Days in Shelter",
+    "status": "Status",
+    "location": "Location",
+    "description": "Description"
+  },
+  "species": {
+    "dog": "Dog",
+    "cat": "Cat",
+    "rabbit": "Rabbit",
+    "bird": "Bird",
+    "reptile": "Reptile",
+    "small_mammal": "Small Mammal",
+    "farm": "Farm Animal",
+    "horse": "Horse",
+    "wildlife": "Wildlife",
+    "other": "Other"
+  },
+  "sex": {
+    "male": "Male",
+    "female": "Female",
+    "unknown": "Unknown"
+  },
+  "status": {
+    "in_shelter": "In Shelter",
+    "in_foster": "In Foster",
+    "in_medical": "In Medical",
+    "available": "Available",
+    "on_hold": "On Hold",
+    "pending_adoption": "Pending Adoption",
+    "adopted": "Adopted",
+    "transferred": "Transferred",
+    "returned_to_owner": "Returned to Owner",
+    "deceased": "Deceased",
+    "euthanized": "Euthanized",
+    "released": "Released"
+  },
+  "intake": {
+    "title": "Intake",
+    "stray": "Stray",
+    "owner_surrender": "Owner Surrender",
+    "transfer": "Transfer In",
+    "return": "Return",
+    "born_in_care": "Born in Care",
+    "confiscation": "Confiscation",
+    "emergency": "Emergency",
+    "unknown": "Unknown"
+  },
+  "actions": {
+    "addAnimal": "Add Animal",
+    "editAnimal": "Edit Animal",
+    "quickUpdate": "Quick Update",
+    "transfer": "Request Transfer",
+    "markAdopted": "Mark Adopted",
+    "addNote": "Add Note",
+    "uploadPhoto": "Upload Photo",
+    "printKennelCard": "Print Kennel Card",
+    "viewHistory": "View History"
+  },
+  "age": {
+    "baby": "Baby",
+    "young": "Young",
+    "adult": "Adult",
+    "senior": "Senior",
+    "unknown": "Unknown"
+  },
+  "messages": {
+    "created": "Animal added successfully",
+    "updated": "Animal updated successfully",
+    "deleted": "Animal removed",
+    "transferred": "Transfer request sent",
+    "photoUploaded": "Photo uploaded successfully"
+  }
+}

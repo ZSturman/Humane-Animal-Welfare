@@ -1,0 +1,71 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Database
+*.db
+*.sqlite
+prisma/migrations/**/migration_lock.toml
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+.cache/
+
+# Uploads (local development)
+uploads/
+!uploads/.gitkeep
+
+# Turbo
+.turbo/
+
+# Vercel
+.vercel/
+
+# Generated files
+*.generated.ts
+*.generated.json
+openapi.json
+
+# Secrets
+*.pem
+*.key
+secrets/

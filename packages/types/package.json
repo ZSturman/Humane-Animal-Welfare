@@ -1,0 +1,28 @@
+{
+  "name": "@shelter-link/types",
+  "version": "1.0.0",
+  "description": "Shared TypeScript types for Shelter Link",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./api": {
+      "import": "./dist/api.js",
+      "types": "./dist/api.d.ts"
+    },
+    "./risk": {
+      "import": "./dist/risk.js",
+      "types": "./dist/risk.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  }
+}

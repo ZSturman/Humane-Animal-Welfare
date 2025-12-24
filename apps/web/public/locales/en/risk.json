@@ -1,0 +1,85 @@
+{
+  "title": "Risk Assessment",
+  "dashboard": {
+    "title": "Risk Overview",
+    "subtitle": "Animals requiring immediate attention",
+    "refreshed": "Last updated {{time}}"
+  },
+  "severity": {
+    "critical": "Critical",
+    "high": "High",
+    "elevated": "Elevated",
+    "moderate": "Moderate",
+    "low": "Low"
+  },
+  "score": {
+    "label": "Urgency Score",
+    "outOf": "out of 100"
+  },
+  "reasons": {
+    "long_los": "Extended Length of Stay",
+    "medical_critical": "Critical Medical Condition",
+    "medical_urgent": "Urgent Medical Need",
+    "medical_chronic": "Chronic Medical Condition",
+    "behavioral_severe": "Severe Behavioral Concerns",
+    "behavioral_moderate": "Moderate Behavioral Issues",
+    "kennel_stress": "Kennel Stress",
+    "capacity_pressure": "Shelter at Capacity",
+    "senior": "Senior Animal",
+    "bonded_pair": "Bonded Pair (Harder to Place)",
+    "special_needs": "Special Needs",
+    "breed_restriction": "Breed Restrictions Apply",
+    "size_large": "Large Size",
+    "color_bias": "Color Bias (Black Animal)",
+    "previous_return": "Previously Returned",
+    "bite_history": "Bite History",
+    "declawed": "Declawed (Cat)",
+    "fiv_positive": "FIV Positive (Cat)",
+    "felv_positive": "FeLV Positive (Cat)",
+    "heartworm": "Heartworm Positive (Dog)",
+    "hospice": "Hospice Care",
+    "flight_risk": "Flight Risk",
+    "no_children": "Not Safe with Children",
+    "no_other_pets": "Must Be Only Pet",
+    "manual_override": "Manually Flagged",
+    "unknown": "Unknown Factor"
+  },
+  "categories": {
+    "lengthOfStay": "Length of Stay",
+    "medical": "Medical",
+    "behavioral": "Behavioral",
+    "capacity": "Capacity",
+    "adoptability": "Adoptability",
+    "special": "Special Factors"
+  },
+  "actions": {
+    "recalculate": "Recalculate Scores",
+    "override": "Override Score",
+    "quickUpdate": "Quick Status Update",
+    "viewDetails": "View Risk Details",
+    "alert": "Send Alert"
+  },
+  "override": {
+    "title": "Override Risk Score",
+    "currentScore": "Current Score",
+    "newScore": "New Score",
+    "reason": "Reason for Override",
+    "reasonPlaceholder": "Explain why this animal's risk is being manually adjusted...",
+    "visibility": "Visibility",
+    "public": "Show on public site",
+    "rescue": "Share with rescue partners",
+    "confirm": "Confirm Override",
+    "warning": "Manual overrides will be logged and audited."
+  },
+  "alerts": {
+    "title": "Risk Alerts",
+    "critical": "{{count}} animals at critical risk",
+    "threshold": "{{name}} crossed {{threshold}} threshold",
+    "newHigh": "New high-risk animal: {{name}}",
+    "capacityWarning": "Shelter approaching capacity ({{percent}}%)"
+  },
+  "empty": {
+    "title": "No at-risk animals",
+    "description": "Great news! No animals currently require urgent attention."
+  }
+}

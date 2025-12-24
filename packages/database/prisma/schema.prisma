@@ -1,0 +1,1546 @@
+// ============================================================================
+// SHELTER LINK - Canonical Data Model (Prisma Schema)
+// ============================================================================
+// A unified, humane animal shelter platform designed to surface at-risk animals
+// and enable cross-shelter collaboration for lifesaving outcomes.
+//
+// Key Design Principles:
+// - Event sourcing for complete audit trail and temporal queries
+// - Row-level security ready for multi-tenant isolation
+// - Structured risk/urgency signals with machine-readable severity
+// - SAC (Shelter Animals Count) taxonomy compliance
+// - ISO 11784/11785 microchip standard support
+// ============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions", "multiSchema"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+  extensions = [uuid_ossp(map: "uuid-ossp"), pgcrypto]
+}
+
+// ============================================================================
+// ORGANIZATION & ACCESS CONTROL
+// ============================================================================
+
+/// Represents a shelter, rescue, or animal welfare organization
+model Organization {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Public-facing name
+  name              String
+  /// URL-safe identifier
+  slug              String              @unique
+  /// Type of organization (shelter, rescue, sanctuary, etc.)
+  type              OrganizationType
+  /// Current operational status
+  status            OrganizationStatus  @default(ACTIVE)
+  /// Physical address
+  address           Json?
+  /// Geographic coordinates for distance calculations
+  latitude          Float?
+  longitude         Float?
+  /// Timezone for local time display
+  timezone          String              @default("America/New_York")
+  /// Primary contact information
+  phone             String?
+  email             String?
+  website           String?
+  /// Operating hours (JSON: { monday: { open: "09:00", close: "17:00" }, ... })
+  operatingHours    Json?
+  /// Organization settings and preferences
+  settings          Json                @default("{}")
+  /// Branding (logo URL, colors, etc.)
+  branding          Json?
+  /// Integration configurations (encrypted)
+  integrations      Json?
+  /// SAC (Shelter Animals Count) organization ID for reporting
+  sacOrganizationId String?
+  /// Parent organization (for multi-site setups)
+  parentId          String?             @db.Uuid
+  parent            Organization?       @relation("OrgHierarchy", fields: [parentId], references: [id])
+  children          Organization[]      @relation("OrgHierarchy")
+  
+  // Relations
+  animals           Animal[]
+  users             UserOrganization[]
+  locations         Location[]
+  intakes           IntakeEvent[]
+  outcomes          OutcomeEvent[]
+  transfersFrom     TransferRequest[]   @relation("TransferFrom")
+  transfersTo       TransferRequest[]   @relation("TransferTo")
+  webhooks          Webhook[]
+  apiKeys           ApiKey[]
+  auditLogs         AuditLog[]
+  
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  
+  @@index([slug])
+  @@index([type, status])
+  @@index([latitude, longitude])
+  @@map("organizations")
+}
+
+enum OrganizationType {
+  MUNICIPAL_SHELTER    // Government-operated animal control
+  PRIVATE_SHELTER      // Non-profit private shelter
+  RESCUE               // Rescue organization (often foster-based)
+  SANCTUARY            // Permanent care facility
+  FOSTER_NETWORK       // Foster-only organization
+  SPAY_NEUTER_CLINIC   // Spay/neuter focused
+  VETERINARY_PARTNER   // Partner vet clinic
+  TRANSPORT_NETWORK    // Animal transport organization
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  INACTIVE
+  PENDING_VERIFICATION
+}
+
+/// Physical locations within an organization (buildings, kennels, etc.)
+model Location {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String        @db.Uuid
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  name           String
+  type           LocationType
+  /// Capacity by species (JSON: { DOG: 50, CAT: 100 })
+  capacity       Json?
+  /// Current occupancy (updated via trigger)
+  occupancy      Json?
+  address        Json?
+  isPublic       Boolean       @default(true)
+  isActive       Boolean       @default(true)
+  
+  animals        Animal[]
+  
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  
+  @@unique([organizationId, name])
+  @@map("locations")
+}
+
+enum LocationType {
+  MAIN_BUILDING
+  KENNEL
+  CATTERY
+  ISOLATION
+  MEDICAL
+  FOSTER_HOME
+  OFFSITE_ADOPTION
+  INTAKE_AREA
+  QUARANTINE
+}
+
+/// User accounts for shelter staff, volunteers, and adopters
+model User {
+  id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email           String              @unique
+  emailVerified   DateTime?
+  passwordHash    String?
+  /// Full name
+  name            String
+  /// Preferred display name
+  displayName     String?
+  phone           String?
+  /// Preferred language (ISO 639-1 code)
+  locale          String              @default("en")
+  /// Avatar URL
+  avatarUrl       String?
+  /// User preferences
+  preferences     Json                @default("{}")
+  /// Account status
+  status          UserStatus          @default(ACTIVE)
+  /// Last login timestamp
+  lastLoginAt     DateTime?
+  /// Failed login attempts (for rate limiting)
+  failedAttempts  Int                 @default(0)
+  lockedUntil     DateTime?
+  
+  // Relations
+  organizations   UserOrganization[]
+  sessions        Session[]
+  auditLogs       AuditLog[]
+  notifications   Notification[]
+  savedSearches   SavedSearch[]
+  
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  
+  @@index([email])
+  @@index([status])
+  @@map("users")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+  PENDING_VERIFICATION
+}
+
+/// Junction table for users and organizations with role-based access
+model UserOrganization {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String        @db.Uuid
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String        @db.Uuid
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  role           UserRole
+  /// Fine-grained permissions (JSON array of permission strings)
+  permissions    Json          @default("[]")
+  /// Is this the user's primary/default organization?
+  isPrimary      Boolean       @default(false)
+  
+  invitedAt      DateTime?
+  joinedAt       DateTime      @default(now())
+  
+  @@unique([userId, organizationId])
+  @@index([organizationId, role])
+  @@map("user_organizations")
+}
+
+enum UserRole {
+  OWNER           // Full administrative access
+  ADMIN           // Administrative access (no billing/ownership)
+  MANAGER         // Can manage animals, users (limited)
+  STAFF           // Standard staff operations
+  VETERINARIAN    // Medical access focus
+  VET_TECH        // Veterinary technician
+  VOLUNTEER       // Limited access
+  FOSTER          // Foster-specific access
+  TRANSPORTER     // Transport coordination access
+  READ_ONLY       // View-only access
+}
+
+/// User sessions for authentication
+model Session {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String    @db.Uuid
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  token        String    @unique
+  refreshToken String?   @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  
+  createdAt    DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+/// API keys for external integrations
+model ApiKey {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String        @db.Uuid
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  name           String
+  /// Hashed API key (actual key only shown once on creation)
+  keyHash        String        @unique
+  /// Key prefix for identification (e.g., "sk_live_abc")
+  keyPrefix      String
+  /// Scopes/permissions for this key
+  scopes         Json          @default("[]")
+  /// Rate limit (requests per minute)
+  rateLimit      Int           @default(60)
+  
+  lastUsedAt     DateTime?
+  expiresAt      DateTime?
+  isActive       Boolean       @default(true)
+  
+  createdAt      DateTime      @default(now())
+  
+  @@index([keyPrefix])
+  @@map("api_keys")
+}
+
+// ============================================================================
+// CORE ANIMAL DATA MODEL
+// ============================================================================
+
+/// Central animal record with cross-shelter identity support
+model Animal {
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Current organization housing the animal
+  organizationId   String           @db.Uuid
+  organization     Organization     @relation(fields: [organizationId], references: [id])
+  /// Current location within the organization
+  locationId       String?          @db.Uuid
+  location         Location?        @relation(fields: [locationId], references: [id])
+  
+  // === IDENTITY ===
+  /// Primary name (can be updated)
+  name             String
+  /// Species (required)
+  species          Species
+  /// Primary breed
+  breedPrimary     String?
+  /// Secondary breed (for mixes)
+  breedSecondary   String?
+  /// Is breed confirmed or estimated?
+  breedConfirmed   Boolean          @default(false)
+  /// Detailed breed/mix description
+  breedDescription String?
+  
+  // === PHYSICAL ATTRIBUTES ===
+  /// Sex at intake
+  sex              Sex
+  /// Current altered (spay/neuter) status
+  alteredStatus    AlteredStatus    @default(UNKNOWN)
+  /// Date of spay/neuter if known
+  alteredDate      DateTime?
+  /// Primary coat color
+  colorPrimary     String?
+  /// Secondary coat color
+  colorSecondary   String?
+  /// Coat pattern
+  pattern          String?
+  /// Coat length/type
+  coatType         String?
+  /// Weight in kilograms
+  weightKg         Float?
+  /// Weight last updated
+  weightDate       DateTime?
+  /// Size category
+  size             SizeCategory?
+  
+  // === AGE ===
+  /// Known birth date (if available)
+  birthDate        DateTime?
+  /// Estimated birth date (if actual unknown)
+  birthDateEstimated DateTime?
+  /// Age category at intake (for display when exact age unknown)
+  ageCategory      AgeCategory?
+  
+  // === IDENTIFICATION NUMBERS ===
+  /// Microchip numbers (can have multiple)
+  microchips       Microchip[]
+  /// Organization's internal ID/cage card number
+  internalId       String?
+  /// Previous shelter IDs (for transfers)
+  previousIds      Json?            @default("[]")
+  
+  // === STATUS ===
+  /// Current disposition status
+  status           AnimalStatus     @default(IN_SHELTER)
+  /// Substatus for more detail
+  substatus        String?
+  /// Current kennel/cage/location name
+  kennelNumber     String?
+  /// Is available for public viewing/adoption?
+  isPublic         Boolean          @default(true)
+  /// Featured animal flag
+  isFeatured       Boolean          @default(false)
+  
+  // === RISK & URGENCY (Critical for surfacing at-risk animals) ===
+  riskProfile      RiskProfile?
+  
+  // === DESCRIPTIONS ===
+  /// Public-facing description (supports i18n via JSON)
+  description      Json?
+  /// Internal staff notes
+  staffNotes       String?
+  /// Special needs description
+  specialNeeds     String?
+  /// Intake notes
+  intakeNotes      String?
+  
+  // === CHARACTERISTICS ===
+  /// Behavioral/personality tags
+  characteristics  Json?            @default("[]")
+  /// Good with kids?
+  goodWithChildren Boolean?
+  /// Good with dogs?
+  goodWithDogs     Boolean?
+  /// Good with cats?
+  goodWithCats     Boolean?
+  /// House trained?
+  houseTrained     Boolean?
+  /// Crate trained?
+  crateTrained     Boolean?
+  /// Leash trained?
+  leashTrained     Boolean?
+  /// Special diet requirements
+  specialDiet      String?
+  /// Exercise needs level
+  exerciseNeeds    ExerciseLevel?
+  /// Energy level
+  energyLevel      EnergyLevel?
+  
+  // === INTAKE/OUTCOME ===
+  /// Date animal entered current organization
+  intakeDate       DateTime         @default(now())
+  /// Original intake date (if transferred from another org)
+  originalIntakeDate DateTime?
+  /// Outcome date (if applicable)
+  outcomeDate      DateTime?
+  /// Days in shelter (computed field, updated via trigger)
+  daysInShelter    Int              @default(0)
+  
+  // === LEGAL ===
+  /// Legal hold status
+  holdStatus       HoldStatus       @default(NONE)
+  /// Hold expiry date
+  holdExpiryDate   DateTime?
+  /// Hold reason/case number
+  holdReason       String?
+  
+  // === ADOPTION ===
+  /// Adoption fee (in cents)
+  adoptionFee      Int?
+  /// Fee waived?
+  feeWaived        Boolean          @default(false)
+  /// Sponsorship amount available (in cents)
+  sponsorshipAmount Int?
+  
+  // Relations
+  intakeEvents     IntakeEvent[]
+  outcomeEvents    OutcomeEvent[]
+  medicalRecords   MedicalRecord[]
+  vaccinations     Vaccination[]
+  behavioralAssessments BehavioralAssessment[]
+  media            Media[]
+  transferRequests TransferRequest[]
+  notes            AnimalNote[]
+  events           AnimalEvent[]
+  
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  
+  @@index([organizationId, status])
+  @@index([species, status])
+  @@index([intakeDate])
+  @@index([status, daysInShelter])
+  @@index([isPublic, status])
+  @@map("animals")
+}
+
+enum Species {
+  DOG
+  CAT
+  RABBIT
+  GUINEA_PIG
+  HAMSTER
+  BIRD
+  REPTILE
+  FERRET
+  HORSE
+  PIG
+  GOAT
+  CHICKEN
+  SMALL_MAMMAL
+  FARM_ANIMAL
+  WILDLIFE
+  OTHER
+}
+
+enum Sex {
+  MALE
+  FEMALE
+  UNKNOWN
+}
+
+enum AlteredStatus {
+  YES
+  NO
+  UNKNOWN
+  PENDING
+}
+
+enum SizeCategory {
+  TINY       // < 5 lbs
+  SMALL      // 5-20 lbs
+  MEDIUM     // 20-50 lbs
+  LARGE      // 50-90 lbs
+  EXTRA_LARGE // > 90 lbs
+}
+
+enum AgeCategory {
+  BABY        // Kitten/puppy (< 6 months)
+  YOUNG       // Young adult (6 months - 2 years)
+  ADULT       // Adult (2-7 years)
+  SENIOR      // Senior (7+ years)
+  GERIATRIC   // Geriatric (10+ years for dogs, 12+ for cats)
+}
+
+enum AnimalStatus {
+  IN_SHELTER      // Currently at shelter
+  IN_FOSTER       // In foster care
+  IN_MEDICAL      // In medical treatment
+  HOLD            // On hold (legal, behavioral, etc.)
+  AVAILABLE       // Ready for adoption
+  PENDING         // Adoption pending
+  ADOPTED         // Adopted
+  TRANSFERRED     // Transferred to another org
+  RETURNED        // Returned after adoption
+  RECLAIMED       // Returned to owner
+  ESCAPED         // Escaped (hopefully temporary)
+  DECEASED        // Died naturally
+  EUTHANIZED      // Humanely euthanized
+  MISSING         // Missing from shelter
+}
+
+enum HoldStatus {
+  NONE
+  STRAY_HOLD        // Standard stray holding period
+  OWNER_SURRENDER   // Waiting for owner paperwork
+  LEGAL_HOLD        // Court/law enforcement hold
+  BEHAVIORAL_HOLD   // Behavioral evaluation
+  MEDICAL_HOLD      // Medical treatment
+  BITE_QUARANTINE   // Bite quarantine
+  RESCUE_HOLD       // Hold for rescue partner
+}
+
+enum ExerciseLevel {
+  LOW
+  MODERATE
+  HIGH
+  VERY_HIGH
+}
+
+enum EnergyLevel {
+  CALM
+  MODERATE
+  ACTIVE
+  VERY_ACTIVE
+}
+
+/// Microchip records supporting ISO 11784/11785 standard
+model Microchip {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  animalId       String    @db.Uuid
+  animal         Animal    @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  
+  /// Normalized chip number (spaces/dashes removed)
+  chipNumber     String
+  /// Original format as scanned
+  originalFormat String?
+  /// Chip type (FDX-A, FDX-B, HDX, AVID, etc.)
+  chipType       String?
+  /// Manufacturer code (first 3 digits typically)
+  manufacturer   String?
+  /// Is this chip registered in our system?
+  isRegistered   Boolean   @default(false)
+  /// External registry (HomeAgain, PetLink, etc.)
+  registryName   String?
+  /// Date chip was implanted
+  implantDate    DateTime?
+  /// Date chip was scanned/verified
+  scanDate       DateTime?
+  /// Is this the primary chip?
+  isPrimary      Boolean   @default(true)
+  
+  createdAt      DateTime  @default(now())
+  
+  @@unique([chipNumber])
+  @@index([chipNumber])
+  @@map("microchips")
+}
+
+// ============================================================================
+// RISK PROFILE - Critical for surfacing at-risk animals
+// ============================================================================
+
+/// Structured risk and urgency assessment for prioritizing vulnerable animals
+model RiskProfile {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  animalId       String           @unique @db.Uuid
+  animal         Animal           @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  
+  // === COMPOSITE URGENCY SCORE ===
+  /// Overall urgency score (0-100, higher = more urgent)
+  urgencyScore   Int              @default(0)
+  /// Risk severity level
+  riskSeverity   RiskSeverity     @default(LOW)
+  /// Primary risk reason(s)
+  riskReasons    Json             @default("[]")
+  
+  // === TIME-BASED FACTORS ===
+  /// Days in shelter (denormalized for queries)
+  lengthOfStay   Int              @default(0)
+  /// Target LOS for this animal type
+  targetLos      Int?
+  /// LOS percentile vs similar animals
+  losPercentile  Float?
+  /// Deadline date (hold expiry, treatment deadline, etc.)
+  deadlineDate   DateTime?
+  /// Type of deadline
+  deadlineType   String?
+  
+  // === MEDICAL FACTORS ===
+  /// Medical urgency score (0-10)
+  medicalScore   Int              @default(0)
+  /// Has time-sensitive medical needs?
+  hasMedicalDeadline Boolean      @default(false)
+  /// Treatable conditions that affect adoptability
+  medicalConditions Json          @default("[]")
+  
+  // === BEHAVIORAL FACTORS ===
+  /// Behavioral concern score (0-10)
+  behavioralScore Int             @default(0)
+  /// Is kennel stress evident?
+  kennelStressLevel KennelStressLevel @default(NONE)
+  /// Enrichment needs not being met
+  enrichmentDeficit Boolean       @default(false)
+  
+  // === CAPACITY/POPULATION FACTORS ===
+  /// Current shelter capacity percentage
+  shelterCapacity Float?
+  /// Species-specific capacity percentage
+  speciesCapacity Float?
+  /// Is shelter over capacity?
+  isOverCapacity  Boolean         @default(false)
+  
+  // === ADOPTABILITY PREDICTION ===
+  /// Predicted adoptability score (0-100, ML-generated)
+  adoptabilityScore Float?
+  /// Historical views to application ratio
+  viewsToAppsRatio Float?
+  /// Number of profile views
+  profileViews    Int              @default(0)
+  /// Number of inquiry/applications
+  inquiryCount    Int              @default(0)
+  
+  // === SPECIAL CATEGORIES ===
+  /// Is this a senior animal?
+  isSenior        Boolean          @default(false)
+  /// Has special needs requiring specific adopter?
+  hasSpecialNeeds Boolean          @default(false)
+  /// Special needs categories
+  specialNeedsCategories Json      @default("[]")
+  /// Is in a vulnerable category (bonded pair, black dog, etc.)?
+  vulnerableCategory String?
+  
+  // === VISIBILITY ===
+  /// Is risk info visible publicly?
+  publicVisibility Boolean         @default(false)
+  /// Fields visible to public (JSON array)
+  publicFields    Json             @default("[]")
+  /// Is visible to rescue partners?
+  rescueVisibility Boolean         @default(true)
+  
+  // === SCORING METADATA ===
+  /// Last time score was calculated
+  lastCalculated  DateTime         @default(now())
+  /// Scoring algorithm version
+  algorithmVersion String          @default("1.0")
+  /// Raw factor weights used
+  factorWeights   Json?
+  /// Manual override flag
+  isManualOverride Boolean         @default(false)
+  /// Override reason if manual
+  overrideReason  String?
+  /// User who set override
+  overrideBy      String?
+  
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  
+  @@index([urgencyScore])
+  @@index([riskSeverity])
+  @@index([isSenior])
+  @@index([hasSpecialNeeds])
+  @@map("risk_profiles")
+}
+
+enum RiskSeverity {
+  CRITICAL    // Immediate action required (euthanasia list, critical medical)
+  HIGH        // Urgent attention needed (long LOS, deteriorating)
+  ELEVATED    // Above normal concern
+  MODERATE    // Standard monitoring
+  LOW         // No immediate concerns
+}
+
+enum KennelStressLevel {
+  NONE
+  MILD
+  MODERATE
+  SEVERE
+  CRITICAL
+}
+
+// ============================================================================
+// INTAKE & OUTCOME EVENTS (SAC Taxonomy Compliant)
+// ============================================================================
+
+/// Intake event following Shelter Animals Count categories
+model IntakeEvent {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  animalId       String           @db.Uuid
+  animal         Animal           @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  organizationId String           @db.Uuid
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  
+  /// SAC intake type
+  intakeType     IntakeType
+  /// More specific intake reason
+  intakeSubtype  String?
+  /// Date/time of intake
+  intakeDate     DateTime         @default(now())
+  /// Intake condition
+  condition      IntakeCondition  @default(HEALTHY)
+  /// Condition notes
+  conditionNotes String?
+  
+  /// For strays: location found
+  foundLocation  String?
+  foundAddress   Json?
+  foundLatitude  Float?
+  foundLongitude Float?
+  
+  /// For owner surrenders
+  surrenderReasonId String?
+  surrenderReason SurrenderReason? @relation(fields: [surrenderReasonId], references: [id])
+  previousOwnerId String?
+  ownerInfo       Json?           // Encrypted/sensitive
+  
+  /// For transfers: source organization
+  sourceOrgId    String?
+  sourceOrgName  String?
+  
+  /// For returns: original outcome ID
+  originalOutcomeId String?       @db.Uuid
+  
+  /// Staff member processing intake
+  processedById  String?
+  processedBy    String?
+  
+  /// Associated documents (intake form, etc.)
+  documents      Json?
+  notes          String?
+  
+  createdAt      DateTime         @default(now())
+  
+  @@index([animalId])
+  @@index([organizationId, intakeDate])
+  @@index([intakeType])
+  @@map("intake_events")
+}
+
+enum IntakeType {
+  // SAC Standard Categories
+  STRAY                // Found stray
+  OWNER_SURRENDER      // Surrendered by owner
+  TRANSFER_IN          // Transfer from another org
+  RETURN               // Return from adoption/foster
+  BORN_IN_CARE         // Born at shelter
+  OWNER_INTENDED_EUTHANASIA // Owner requested euthanasia
+  WILDLIFE             // Wildlife intake
+  SEIZED_CUSTODY       // Seized/custody case
+  OTHER                // Other/unknown
+}
+
+enum IntakeCondition {
+  HEALTHY              // No apparent health issues
+  TREATABLE_MINOR      // Minor treatable condition
+  TREATABLE_MAJOR      // Major treatable condition
+  UNTREATABLE_SUFFERING // Untreatable, suffering
+  UNTREATABLE_MANAGEABLE // Untreatable but manageable
+  UNDERAGE             // Too young for assessment
+  UNKNOWN              // Unable to assess
+}
+
+/// Surrender reasons for analytics and prevention programs
+model SurrenderReason {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String        @unique
+  category    String
+  description String
+  isActive    Boolean       @default(true)
+  
+  intakes     IntakeEvent[]
+  
+  @@map("surrender_reasons")
+}
+
+/// Outcome event following Shelter Animals Count categories
+model OutcomeEvent {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  animalId       String          @db.Uuid
+  animal         Animal          @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  organizationId String          @db.Uuid
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  
+  /// SAC outcome type
+  outcomeType    OutcomeType
+  /// More specific outcome subtype
+  outcomeSubtype String?
+  /// Date/time of outcome
+  outcomeDate    DateTime        @default(now())
+  
+  /// For adoptions
+  adopterInfo    Json?           // Encrypted/sensitive
+  adoptionFee    Int?            // In cents
+  
+  /// For transfers
+  destinationOrgId String?
+  destinationOrgName String?
+  
+  /// For reclaims (return to owner)
+  ownerInfo      Json?           // Encrypted/sensitive
+  reclaimFee     Int?
+  
+  /// For euthanasia (SAC reason codes)
+  euthanasiaReason EuthanasiaReason?
+  euthanasiaReasonNotes String?
+  
+  /// For deaths
+  deathCause     String?
+  
+  /// Processing info
+  processedById  String?
+  processedBy    String?
+  
+  /// Follow-up status
+  followUpDate   DateTime?
+  followUpStatus String?
+  
+  documents      Json?
+  notes          String?
+  
+  createdAt      DateTime        @default(now())
+  
+  @@index([animalId])
+  @@index([organizationId, outcomeDate])
+  @@index([outcomeType])
+  @@map("outcome_events")
+}
+
+enum OutcomeType {
+  // SAC Standard Categories - Live Outcomes
+  ADOPTION             // Adopted
+  TRANSFER_OUT         // Transfer to another org
+  RETURN_TO_OWNER      // Returned to owner
+  RETURN_TO_FIELD      // TNR - returned to field
+  
+  // SAC Standard Categories - Other Outcomes
+  EUTHANASIA           // Humanely euthanized
+  DIED_IN_CARE         // Died while in care
+  MISSING              // Lost/escaped
+  
+  // Foster (subset of in-care, tracked separately)
+  FOSTER               // Moved to foster
+  RETURN_FROM_FOSTER   // Returned from foster
+  
+  // Other
+  OTHER                // Other outcome
+}
+
+enum EuthanasiaReason {
+  // SAC categories
+  OWNER_REQUESTED      // At owner's request (with pet at intake)
+  MEDICAL              // Untreatable medical condition
+  BEHAVIORAL           // Untreatable behavioral condition
+  SPACE                // Shelter at capacity (should be zero goal)
+  OTHER                // Other reason
+}
+
+// ============================================================================
+// MEDICAL RECORDS
+// ============================================================================
+
+/// Medical record entry
+model MedicalRecord {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  animalId       String           @db.Uuid
+  animal         Animal           @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  
+  /// Type of medical record
+  recordType     MedicalRecordType
+  /// Date of exam/treatment
+  date           DateTime         @default(now())
+  /// Diagnosis/condition
+  diagnosis      String?
+  /// Treatment provided
+  treatment      String?
+  /// Medications prescribed
+  medications    Json?            @default("[]")
+  /// Lab results
+  labResults     Json?
+  /// Vital signs
+  vitals         Json?
+  /// Weight at time of exam (kg)
+  weight         Float?
+  /// Body condition score (1-9)
+  bodyConditionScore Int?
+  /// Prognosis
+  prognosis      String?
+  /// Follow-up required?
+  followUpRequired Boolean        @default(false)
+  /// Follow-up date
+  followUpDate   DateTime?
+  /// Is this condition treatable?
+  isTreatable    Boolean          @default(true)
+  /// Does this affect adoptability?
+  affectsAdoptability Boolean     @default(false)
+  /// Estimated treatment cost (cents)
+  estimatedCost  Int?
+  
+  /// Veterinarian/staff who created record
+  veterinarianId String?
+  veterinarian   String?
+  
+  /// Attachments (x-rays, lab reports, etc.)
+  attachments    Json?
+  notes          String?
+  
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  
+  @@index([animalId])
+  @@index([recordType])
+  @@index([date])
+  @@map("medical_records")
+}
+
+enum MedicalRecordType {
+  INTAKE_EXAM
+  WELLNESS_EXAM
+  SICK_EXAM
+  EMERGENCY
+  SURGERY
+  DENTAL
+  LAB_WORK
+  IMAGING
+  TREATMENT
+  MEDICATION
+  SPAY_NEUTER
+  EUTHANASIA
+  NECROPSY
+  OTHER
+}
+
+/// Vaccination record
+model Vaccination {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  animalId       String           @db.Uuid
+  animal         Animal           @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  
+  /// Vaccine type
+  vaccineType    String
+  /// Product name/manufacturer
+  product        String?
+  /// Lot number
+  lotNumber      String?
+  /// Date administered
+  dateGiven      DateTime         @default(now())
+  /// Date expires
+  expirationDate DateTime?
+  /// Due date for next dose
+  nextDueDate    DateTime?
+  /// Route of administration
+  route          VaccinationRoute @default(SUBCUTANEOUS)
+  /// Site of injection
+  site           String?
+  /// Administered by
+  administeredById String?
+  administeredBy String?
+  
+  notes          String?
+  
+  createdAt      DateTime         @default(now())
+  
+  @@index([animalId])
+  @@index([vaccineType])
+  @@map("vaccinations")
+}
+
+enum VaccinationRoute {
+  SUBCUTANEOUS
+  INTRAMUSCULAR
+  INTRANASAL
+  ORAL
+  TRANSDERMAL
+}
+
+// ============================================================================
+// BEHAVIORAL ASSESSMENTS
+// ============================================================================
+
+/// Behavioral assessment record
+model BehavioralAssessment {
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  animalId       String             @db.Uuid
+  animal         Animal             @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  
+  /// Assessment type/protocol used
+  assessmentType String             @default("OBSERVATION")
+  /// Date of assessment
+  date           DateTime           @default(now())
+  /// Location of assessment
+  location       String?
+  /// Duration in minutes
+  duration       Int?
+  
+  /// Overall behavioral grade/score
+  overallScore   Int?
+  /// Overall assessment result
+  result         AssessmentResult   @default(NEEDS_OBSERVATION)
+  
+  /// Individual test results (JSON for flexibility)
+  testResults    Json?
+  
+  /// Observed behaviors
+  behaviors      Json?              @default("[]")
+  /// Triggers identified
+  triggers       Json?              @default("[]")
+  /// Recommendations
+  recommendations Json?             @default("[]")
+  
+  /// Resource guarding observed?
+  resourceGuarding Boolean?
+  /// Dog reactivity level
+  dogReactivity  ReactivityLevel?
+  /// Cat reactivity level
+  catReactivity  ReactivityLevel?
+  /// Human reactivity level
+  humanReactivity ReactivityLevel?
+  /// Handling tolerance
+  handlingTolerance ToleranceLevel?
+  
+  /// Placement recommendations
+  placementRecommendations Json?
+  /// Training needs
+  trainingNeeds  Json?
+  
+  /// Assessor info
+  assessorId     String?
+  assessor       String?
+  
+  /// Video/media references
+  mediaReferences Json?
+  notes          String?
+  
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  
+  @@index([animalId])
+  @@index([date])
+  @@index([result])
+  @@map("behavioral_assessments")
+}
+
+enum AssessmentResult {
+  EXCELLENT           // Highly adoptable, no concerns
+  GOOD                // Adoptable, minor considerations
+  FAIR                // Adoptable with conditions
+  NEEDS_TRAINING      // Needs training before adoption
+  NEEDS_OBSERVATION   // More observation required
+  RESTRICTED          // Restricted adoption (experienced homes only)
+  RESCUE_ONLY         // Rescue or sanctuary placement only
+  CONCERNING          // Significant concerns, needs evaluation
+  NOT_ADOPTABLE       // Cannot be safely placed
+}
+
+enum ReactivityLevel {
+  NONE
+  MILD
+  MODERATE
+  SEVERE
+}
+
+enum ToleranceLevel {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+  UNKNOWN
+}
+
+// ============================================================================
+// MEDIA & CONTENT
+// ============================================================================
+
+/// Media attachments (photos, videos, documents)
+model Media {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  animalId       String       @db.Uuid
+  animal         Animal       @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  
+  /// Media type
+  type           MediaType
+  /// Storage URL/path
+  url            String
+  /// Thumbnail URL (for images/videos)
+  thumbnailUrl   String?
+  /// CDN URL if different
+  cdnUrl         String?
+  /// Original filename
+  filename       String?
+  /// MIME type
+  mimeType       String?
+  /// File size in bytes
+  sizeBytes      Int?
+  /// Dimensions for images/videos
+  width          Int?
+  height         Int?
+  /// Duration in seconds (for videos)
+  duration       Int?
+  
+  /// Alt text for accessibility
+  altText        String?
+  /// Caption/description
+  caption        String?
+  /// Display order (lower = first)
+  sortOrder      Int          @default(0)
+  /// Is this the primary/profile image?
+  isPrimary      Boolean      @default(false)
+  /// Is public (shown on adoption listings)?
+  isPublic       Boolean      @default(true)
+  
+  /// Upload info
+  uploadedById   String?
+  uploadedBy     String?
+  
+  createdAt      DateTime     @default(now())
+  
+  @@index([animalId])
+  @@index([type])
+  @@map("media")
+}
+
+enum MediaType {
+  PHOTO
+  VIDEO
+  DOCUMENT
+  MEDICAL_IMAGE
+  BEHAVIORAL_VIDEO
+}
+
+/// Notes/comments on animal records
+model AnimalNote {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  animalId       String       @db.Uuid
+  animal         Animal       @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  
+  /// Note category
+  category       NoteCategory @default(GENERAL)
+  /// Note content
+  content        String
+  /// Is internal only (not shared on transfer)?
+  isInternal     Boolean      @default(true)
+  /// Is pinned/important?
+  isPinned       Boolean      @default(false)
+  
+  authorId       String?
+  author         String?
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  
+  @@index([animalId])
+  @@index([category])
+  @@map("animal_notes")
+}
+
+enum NoteCategory {
+  GENERAL
+  MEDICAL
+  BEHAVIORAL
+  FOSTER
+  ADOPTION
+  VOLUNTEER
+  ENRICHMENT
+  FOLLOW_UP
+  ALERT
+}
+
+// ============================================================================
+// TRANSFERS & CROSS-SHELTER COORDINATION
+// ============================================================================
+
+/// Transfer request between organizations
+model TransferRequest {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  animalId           String             @db.Uuid
+  animal             Animal             @relation(fields: [animalId], references: [id])
+  
+  /// Requesting organization (sending)
+  fromOrganizationId String             @db.Uuid
+  fromOrganization   Organization       @relation("TransferFrom", fields: [fromOrganizationId], references: [id])
+  
+  /// Destination organization (receiving)
+  toOrganizationId   String             @db.Uuid
+  toOrganization     Organization       @relation("TransferTo", fields: [toOrganizationId], references: [id])
+  
+  /// Transfer status
+  status             TransferStatus     @default(PENDING)
+  /// Transfer type
+  type               TransferType       @default(PERMANENT)
+  
+  /// Reason for transfer
+  reason             String?
+  /// Urgency level
+  urgency            TransferUrgency    @default(STANDARD)
+  
+  /// Requested by (user)
+  requestedById      String?
+  requestedBy        String?
+  requestedAt        DateTime           @default(now())
+  
+  /// Responded by (user at destination)
+  respondedById      String?
+  respondedBy        String?
+  respondedAt        DateTime?
+  responseNotes      String?
+  
+  /// Scheduled transport date
+  scheduledDate      DateTime?
+  /// Actual completion date
+  completedAt        DateTime?
+  
+  /// Transport details
+  transportMethod    String?
+  transportContact   String?
+  transportNotes     String?
+  
+  /// Medical/behavioral info shared
+  medicalSummary     String?
+  behavioralSummary  String?
+  /// Documents included
+  documents          Json?
+  
+  /// Follow-up requirements
+  followUpRequired   Boolean            @default(false)
+  followUpNotes      String?
+  
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  
+  @@index([fromOrganizationId, status])
+  @@index([toOrganizationId, status])
+  @@index([animalId])
+  @@index([status])
+  @@map("transfer_requests")
+}
+
+enum TransferStatus {
+  PENDING            // Awaiting response
+  APPROVED           // Approved, not yet completed
+  SCHEDULED          // Transport scheduled
+  IN_TRANSIT         // Currently being transported
+  COMPLETED          // Transfer complete
+  DECLINED           // Declined by destination
+  CANCELLED          // Cancelled by sender
+  EXPIRED            // Request expired
+}
+
+enum TransferType {
+  PERMANENT          // Full transfer of ownership
+  FOSTER             // Foster arrangement
+  MEDICAL            // Medical foster/treatment
+  TEMPORARY          // Temporary hold
+  SANCTUARY          // Sanctuary placement
+}
+
+enum TransferUrgency {
+  CRITICAL           // Immediate (euthanasia imminent)
+  URGENT             // Within 24-48 hours
+  STANDARD           // Normal processing time
+  FLEXIBLE           // No rush
+}
+
+// ============================================================================
+// EVENT SOURCING & AUDIT
+// ============================================================================
+
+/// Immutable event log for complete audit trail
+model AnimalEvent {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Animal this event relates to
+  animalId       String       @db.Uuid
+  animal         Animal       @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  
+  /// Event type
+  eventType      String
+  /// Event version (for schema evolution)
+  version        Int          @default(1)
+  
+  /// Event payload (the actual data)
+  payload        Json
+  
+  /// When the event occurred in the real world
+  occurredAt     DateTime     @default(now())
+  /// When the event was recorded in the system
+  recordedAt     DateTime     @default(now())
+  
+  /// User who caused the event
+  actorId        String?
+  actor          String?
+  /// Organization context
+  organizationId String?      @db.Uuid
+  
+  /// Correlation ID for related events
+  correlationId  String?
+  /// Causation ID (which event caused this one)
+  causationId    String?
+  
+  /// Additional metadata
+  metadata       Json?
+  
+  /// Source system (for imported events)
+  source         String?
+  
+  @@index([animalId])
+  @@index([eventType])
+  @@index([occurredAt])
+  @@index([correlationId])
+  @@map("animal_events")
+}
+
+/// System-wide audit log
+model AuditLog {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  
+  /// User who performed the action
+  userId         String?       @db.Uuid
+  user           User?         @relation(fields: [userId], references: [id])
+  /// Organization context
+  organizationId String?       @db.Uuid
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  
+  /// Action performed
+  action         String
+  /// Resource type (table name)
+  resourceType   String
+  /// Resource ID
+  resourceId     String?
+  
+  /// Changes made (before/after values)
+  changes        Json?
+  
+  /// Request metadata
+  ipAddress      String?
+  userAgent      String?
+  requestId      String?
+  
+  /// Additional context
+  metadata       Json?
+  
+  createdAt      DateTime      @default(now())
+  
+  @@index([userId])
+  @@index([organizationId])
+  @@index([resourceType, resourceId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================================
+// NOTIFICATIONS & ALERTS
+// ============================================================================
+
+/// User notifications
+model Notification {
+  id             String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String              @db.Uuid
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  /// Notification type
+  type           NotificationType
+  /// Title
+  title          String
+  /// Message body
+  message        String
+  /// Link/action URL
+  actionUrl      String?
+  /// Related entity
+  entityType     String?
+  entityId       String?
+  
+  /// Delivery channels sent through
+  channels       Json                @default("[]")
+  /// Read status
+  isRead         Boolean             @default(false)
+  readAt         DateTime?
+  
+  /// Priority level
+  priority       NotificationPriority @default(NORMAL)
+  
+  /// Expiration
+  expiresAt      DateTime?
+  
+  createdAt      DateTime            @default(now())
+  
+  @@index([userId, isRead])
+  @@index([type])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  RISK_ALERT           // Animal reached risk threshold
+  TRANSFER_REQUEST     // Incoming transfer request
+  TRANSFER_UPDATE      // Transfer status change
+  ADOPTION_INQUIRY     // New adoption inquiry
+  MEDICAL_REMINDER     // Medical follow-up due
+  HOLD_EXPIRING        // Hold period expiring
+  CAPACITY_WARNING     // Shelter capacity warning
+  SYSTEM               // System notification
+}
+
+enum NotificationPriority {
+  CRITICAL
+  HIGH
+  NORMAL
+  LOW
+}
+
+/// Saved searches for rescue partners and staff
+model SavedSearch {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String       @db.Uuid
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  /// Search name
+  name           String
+  /// Search criteria
+  criteria       Json
+  /// Notification settings
+  notifications  Json         @default("{\"enabled\": false}")
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  
+  @@index([userId])
+  @@map("saved_searches")
+}
+
+/// Webhooks for external integrations
+model Webhook {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String        @db.Uuid
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  /// Webhook URL
+  url            String
+  /// Events to trigger on
+  events         Json          @default("[]")
+  /// Shared secret for signature verification
+  secret         String
+  /// Is active?
+  isActive       Boolean       @default(true)
+  
+  /// Last delivery attempt
+  lastDeliveryAt DateTime?
+  /// Last delivery status
+  lastStatus     Int?
+  /// Consecutive failures
+  failureCount   Int           @default(0)
+  
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  
+  @@index([organizationId])
+  @@map("webhooks")
+}
+
+// ============================================================================
+// DATA INGESTION & SYNC
+// ============================================================================
+
+/// Data import job tracking
+model ImportJob {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId   String        @db.Uuid
+  
+  /// Import source type
+  sourceType       ImportSourceType
+  /// Source identifier (API key name, file path, etc.)
+  sourceIdentifier String?
+  /// Original filename (for file uploads)
+  filename         String?
+  
+  /// Job status
+  status           ImportStatus  @default(PENDING)
+  
+  /// Processing stats
+  totalRecords     Int           @default(0)
+  processedRecords Int           @default(0)
+  successRecords   Int           @default(0)
+  failedRecords    Int           @default(0)
+  skippedRecords   Int           @default(0)
+  
+  /// Field mapping used
+  fieldMapping     Json?
+  /// Validation errors
+  errors           Json          @default("[]")
+  /// Warnings
+  warnings         Json          @default("[]")
+  
+  /// Processing timestamps
+  startedAt        DateTime?
+  completedAt      DateTime?
+  
+  /// User who initiated
+  initiatedById    String?
+  initiatedBy      String?
+  
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  
+  @@index([organizationId])
+  @@index([status])
+  @@map("import_jobs")
+}
+
+enum ImportSourceType {
+  CSV_UPLOAD
+  EXCEL_UPLOAD
+  ASM3_API
+  SHELTERLUV_API
+  PETPOINT_API
+  MANUAL_ENTRY
+  BULK_UPDATE
+  OTHER_API
+}
+
+enum ImportStatus {
+  PENDING
+  VALIDATING
+  PROCESSING
+  COMPLETED
+  COMPLETED_WITH_ERRORS
+  FAILED
+  CANCELLED
+}
+
+/// Field mapping templates for data import
+model FieldMappingTemplate {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String?      @db.Uuid
+  
+  /// Template name
+  name           String
+  /// Source system type
+  sourceType     ImportSourceType
+  /// Field mappings (source field -> canonical field)
+  mappings       Json
+  /// Value transformations
+  transformations Json        @default("{}")
+  /// Default values
+  defaults       Json         @default("{}")
+  
+  /// Is this a system-provided template?
+  isSystem       Boolean      @default(false)
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  
+  @@map("field_mapping_templates")
+}
