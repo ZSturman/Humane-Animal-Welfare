@@ -1,6 +1,8 @@
 import { useAuthStore } from '@/stores/auth';
+import { getMockResponse, isMockMode } from '@/mocks';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
+const MOCK_MODE = isMockMode();
 
 interface ApiOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
@@ -38,6 +40,47 @@ async function request<T>(
   options: ApiOptions = {}
 ): Promise<ApiResponse<T>> {
   const { params, ...fetchOptions } = options;
+  
+  // Build URL with query params for mock mode
+  let queryString = '';
+  if (params) {
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) {
+        searchParams.append(key, String(value));
+      }
+    });
+    queryString = searchParams.toString();
+  }
+  
+  // Use mock API in demo mode
+  if (MOCK_MODE) {
+    const mockEndpoint = queryString ? `${endpoint}?${queryString}` : endpoint;
+    const mockBody = fetchOptions.body ? JSON.parse(fetchOptions.body as string) : undefined;
+    
+    try {
+      const response = await getMockResponse<T>(mockEndpoint, {
+        method: fetchOptions.method || 'GET',
+        body: mockBody,
+      });
+      
+      if (!response.success) {
+        const errorResponse = response as any;
+        throw new ApiError(
+          errorResponse.error?.code || 'MOCK_ERROR',
+          errorResponse.error?.message || 'Mock API error',
+          404
+        );
+      }
+      
+      return response as ApiResponse<T>;
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError('MOCK_ERROR', 'Mock API error', 500);
+    }
+  }
   
   // Build URL with query params
   let url = `${API_BASE}${endpoint}`;

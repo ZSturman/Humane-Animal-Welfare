@@ -9,8 +9,12 @@
   ],
   "scripts": {
     "dev": "turbo run dev",
+    "dev:demo": "VITE_MOCK_MODE=true npm run dev --filter=@shelter-link/web",
     "build": "turbo run build",
     "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "lint": "turbo run lint",
     "db:generate": "turbo run db:generate --filter=@shelter-link/database",
     "db:push": "turbo run db:push --filter=@shelter-link/database",
@@ -21,6 +25,7 @@
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
+    "@playwright/test": "^1.40.0",
     "@types/node": "^20.10.0",
     "prettier": "^3.1.0",
     "turbo": "^1.11.0",

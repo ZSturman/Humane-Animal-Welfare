@@ -152,8 +152,7 @@ async function registerMiddleware() {
   // Audit logging
   app.addHook('onRequest', auditMiddleware);
   
-  // Auth middleware (decorate request with user)
-  app.decorateRequest('user', null);
+  // Auth middleware (decorates request with organization)
   app.decorateRequest('organization', null);
   app.addHook('onRequest', authMiddleware);
 }

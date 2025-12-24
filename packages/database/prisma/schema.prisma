@@ -703,7 +703,7 @@ model IntakeEvent {
   foundLongitude Float?
   
   /// For owner surrenders
-  surrenderReasonId String?
+  surrenderReasonId String? @db.Uuid
   surrenderReason SurrenderReason? @relation(fields: [surrenderReasonId], references: [id])
   previousOwnerId String?
   ownerInfo       Json?           // Encrypted/sensitive
@@ -1423,31 +1423,70 @@ model SavedSearch {
 
 /// Webhooks for external integrations
 model Webhook {
-  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId String        @db.Uuid
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId    String             @db.Uuid
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   
+  /// Webhook name/description
+  name              String
   /// Webhook URL
-  url            String
+  url               String
+  /// Custom headers (JSON)
+  headers           Json               @default("{}")
   /// Events to trigger on
-  events         Json          @default("[]")
+  events            Json               @default("[]")
   /// Shared secret for signature verification
-  secret         String
+  secret            String
   /// Is active?
-  isActive       Boolean       @default(true)
+  isActive          Boolean            @default(true)
   
+  /// User who created webhook
+  createdBy         String?            @db.Uuid
+  /// Last time webhook was triggered
+  lastTriggeredAt   DateTime?
   /// Last delivery attempt
-  lastDeliveryAt DateTime?
+  lastDeliveryAt    DateTime?
   /// Last delivery status
-  lastStatus     Int?
+  lastStatus        Int?
   /// Consecutive failures
-  failureCount   Int           @default(0)
+  failureCount      Int                @default(0)
   
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  deliveries        WebhookDelivery[]
+  
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
   
   @@index([organizationId])
   @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  webhookId         String    @db.Uuid
+  webhook           Webhook   @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  
+  /// Event type that triggered delivery
+  eventType         String
+  /// Payload sent
+  payload           Json
+  /// Response status code
+  statusCode        Int?
+  /// Delivery status ('success', 'failure', 'pending')
+  status            String    @default("pending")
+  /// Response body
+  responseBody      String?
+  /// Error message if failed
+  errorMessage      String?
+  /// Delivery duration in milliseconds
+  duration          Int?
+  /// Delivery attempt number (for retries)
+  attemptNumber     Int       @default(1)
+  
+  createdAt         DateTime  @default(now())
+  
+  @@index([webhookId])
+  @@index([webhookId, createdAt])
+  @@map("webhook_deliveries")
 }
 
 // ============================================================================

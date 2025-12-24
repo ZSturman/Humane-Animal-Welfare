@@ -4,7 +4,7 @@
  * JWT and API key authentication with RBAC
  */
 
-import type { FastifyRequest, FastifyReply, HookHandlerDoneFunction } from 'fastify';
+import type { FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '@shelter-link/database';
 import { createLogger } from '../lib/logger.js';
 import { UnauthorizedError, ForbiddenError } from '../lib/errors.js';
@@ -78,12 +78,11 @@ export function hasPermission(role: string, permission: Permission): boolean {
  */
 export async function authMiddleware(
   request: FastifyRequest,
-  reply: FastifyReply,
-  done: HookHandlerDoneFunction
+  reply: FastifyReply
 ) {
   // Skip auth for public paths
   if (PUBLIC_PATHS.some(path => request.url.startsWith(path))) {
-    return done();
+    return;
   }
   
   try {
@@ -91,14 +90,14 @@ export async function authMiddleware(
     const authHeader = request.headers.authorization;
     if (authHeader?.startsWith('Bearer ')) {
       await authenticateJWT(request, authHeader.substring(7));
-      return done();
+      return;
     }
     
     // Try API key authentication for allowed paths
     const apiKey = request.headers['x-api-key'];
     if (apiKey && API_KEY_PATHS.some(path => request.url.startsWith(path))) {
       await authenticateApiKey(request, apiKey.toString());
-      return done();
+      return;
     }
     
     // No valid authentication

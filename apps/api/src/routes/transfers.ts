@@ -169,14 +169,14 @@ export async function transferRoutes(app: FastifyInstance) {
     }
     
     // Create auto-generated summaries if not provided
-    const medicalSummary = body.medicalSummary ?? animal.medicalRecords
+    const medicalSummary = body.medicalSummary ?? (animal.medicalRecords
       .slice(0, 3)
       .map(r => `${r.date.toLocaleDateString()}: ${r.diagnosis ?? r.treatment ?? 'Exam'}`)
-      .join('; ') || 'No recent medical records';
+      .join('; ') || 'No recent medical records');
     
-    const behavioralSummary = body.behavioralSummary ?? animal.behavioralAssessments
+    const behavioralSummary = body.behavioralSummary ?? (animal.behavioralAssessments
       .map(a => `${a.date.toLocaleDateString()}: ${a.result}`)
-      .join('; ') || 'No behavioral assessments';
+      .join('; ') || 'No behavioral assessments');
     
     const transfer = await prisma.transferRequest.create({
       data: {

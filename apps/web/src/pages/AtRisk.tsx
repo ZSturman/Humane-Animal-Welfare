@@ -160,6 +160,8 @@ function AnimalRiskCard({ animal }: { animal: AtRiskAnimal }) {
   const { t } = useTranslation(['risk', 'animals']);
   const [showReasons, setShowReasons] = useState(false);
 
+  const reasons = animal.riskReasons ?? [];
+
   const urgencyColor =
     animal.urgencyScore >= 80
       ? 'text-red-600'
@@ -246,15 +248,15 @@ function AnimalRiskCard({ animal }: { animal: AtRiskAnimal }) {
         </div>
 
         {/* Risk reasons */}
-        {animal.riskReasons.length > 0 && (
+        {reasons.length > 0 && (
           <div className="mt-4">
             <button
               onClick={() => setShowReasons(!showReasons)}
               className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
             >
               <span>
-                {animal.riskReasons.length} risk factor
-                {animal.riskReasons.length !== 1 ? 's' : ''}
+                {reasons.length} risk factor
+                {reasons.length !== 1 ? 's' : ''}
               </span>
               <ChevronDown
                 className={clsx(
@@ -266,7 +268,7 @@ function AnimalRiskCard({ animal }: { animal: AtRiskAnimal }) {
 
             {showReasons && (
               <ul className="mt-2 space-y-1">
-                {animal.riskReasons.map((reason) => (
+                {reasons.map((reason) => (
                   <li
                     key={reason}
                     className="text-xs text-slate-600 flex items-center gap-1"

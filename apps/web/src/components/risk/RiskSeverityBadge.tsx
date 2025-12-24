@@ -16,7 +16,16 @@ export default function RiskSeverityBadge({
 }: RiskSeverityBadgeProps) {
   const { t } = useTranslation('risk');
   
-  const normalizedSeverity = severity.toLowerCase() as
+  const normalize = (s?: Severity) => {
+    const val = (s ?? 'low').toString().trim().toLowerCase();
+    if (val.includes('critical')) return 'critical';
+    if (val.includes('high')) return 'high';
+    if (val.includes('elevated')) return 'elevated';
+    if (val.includes('moderate')) return 'moderate';
+    return 'low';
+  };
+
+  const normalizedSeverity = normalize(severity) as
     | 'critical'
     | 'high'
     | 'elevated'

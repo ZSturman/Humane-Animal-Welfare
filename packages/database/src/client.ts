@@ -4,7 +4,7 @@
  * Exports the Prisma client with extensions for common operations
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, AnimalStatus } from '@prisma/client';
 
 // Extend PrismaClient with custom methods
 const prismaClientSingleton = () => {
@@ -71,7 +71,12 @@ const prismaClientSingleton = () => {
               urgencyScore: { gte: 60 },
             },
             status: {
-              in: ['IN_SHELTER', 'IN_FOSTER', 'IN_MEDICAL', 'AVAILABLE'] as const,
+              in: [
+                AnimalStatus.IN_SHELTER, 
+                AnimalStatus.IN_FOSTER, 
+                AnimalStatus.IN_MEDICAL, 
+                AnimalStatus.AVAILABLE
+              ],
             },
             ...(organizationId ? { organizationId } : {}),
           };

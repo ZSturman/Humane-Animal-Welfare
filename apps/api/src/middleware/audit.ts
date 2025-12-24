@@ -4,7 +4,7 @@
  * Logs all API requests for security and compliance
  */
 
-import type { FastifyRequest, FastifyReply, HookHandlerDoneFunction } from 'fastify';
+import type { FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '@shelter-link/database';
 import { createLogger } from '../lib/logger.js';
 
@@ -38,23 +38,20 @@ function extractResourceInfo(url: string): { resourceType: string; resourceId?: 
  */
 export async function auditMiddleware(
   request: FastifyRequest,
-  _reply: FastifyReply,
-  done: HookHandlerDoneFunction
+  _reply: FastifyReply
 ) {
   // Skip non-audited methods
   if (!AUDITED_METHODS.includes(request.method)) {
-    return done();
+    return;
   }
   
   // Skip excluded paths
   if (EXCLUDED_PATHS.some(path => request.url.startsWith(path))) {
-    return done();
+    return;
   }
   
   // Store start time for response timing
   request.auditStartTime = Date.now();
-  
-  done();
 }
 
 /**
