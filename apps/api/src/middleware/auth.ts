@@ -1,34 +1,55 @@
 /**
- * Authentication Middleware
+ * Authentication Middleware (Simplified for Prototype)
  * 
- * JWT and API key authentication with RBAC
+ * JWT authentication with optional anonymous access.
+ * 
+ * TODO: Production - Add these features from _archive/routes/auth.ts:
+ *   - Refresh tokens and session storage
+ *   - API key authentication
+ *   - Rate limiting per user
+ *   - Account locking on failed attempts
+ *   - Audit logging
  */
 
-import type { FastifyRequest, FastifyReply } from 'fastify';
-import { prisma } from '@shelter-link/database';
-import { createLogger } from '../lib/logger.js';
+import type { FastifyRequest, FastifyReply, preHandlerHookHandler } from 'fastify';
+import { PrismaClient } from '@prisma/client';
 import { UnauthorizedError, ForbiddenError } from '../lib/errors.js';
-import bcrypt from 'bcryptjs';
+import { createLogger } from '../lib/logger.js';
 
 const logger = createLogger('auth');
+const prisma = new PrismaClient();
+
+// Extend FastifyRequest with user info
+declare module 'fastify' {
+  interface FastifyRequest {
+    user?: {
+      id: string;
+      email: string;
+      name: string;
+      globalRole: string;
+      organizationId?: string;
+      organizationRole?: string;
+    };
+  }
+}
 
 // Paths that don't require authentication
 const PUBLIC_PATHS = [
+  '/health',
   '/api/health',
+  '/auth/login',
   '/api/auth/login',
-  '/api/auth/register',
-  '/api/auth/refresh',
-  '/api/auth/forgot-password',
+  '/organizations/join-request',
+  '/api/organizations/join-request',
   '/docs',
 ];
 
-// Paths that allow API key authentication
-const API_KEY_PATHS = [
+// Paths that allow anonymous access (but auth is optional)
+const ANONYMOUS_ALLOWED_PATHS = [
+  '/animals',
   '/api/animals',
+  '/organizations',
   '/api/organizations',
-  '/api/transfers',
-  '/api/import',
-  '/api/webhooks',
 ];
 
 /**
@@ -36,31 +57,27 @@ const API_KEY_PATHS = [
  */
 export const Permissions = {
   // Animal permissions
-  'animal:read': ['OWNER', 'ADMIN', 'MANAGER', 'STAFF', 'VETERINARIAN', 'VET_TECH', 'VOLUNTEER', 'FOSTER', 'READ_ONLY'],
-  'animal:write': ['OWNER', 'ADMIN', 'MANAGER', 'STAFF', 'VET_TECH'],
-  'animal:delete': ['OWNER', 'ADMIN', 'MANAGER'],
-  'animal:transfer': ['OWNER', 'ADMIN', 'MANAGER', 'TRANSPORTER'],
-  
-  // Medical permissions
-  'medical:read': ['OWNER', 'ADMIN', 'MANAGER', 'STAFF', 'VETERINARIAN', 'VET_TECH'],
-  'medical:write': ['OWNER', 'ADMIN', 'VETERINARIAN', 'VET_TECH'],
+  'animal:read': ['SUPERADMIN', 'OWNER', 'ADMIN', 'MANAGER', 'STAFF', 'VOLUNTEER', 'READ_ONLY'],
+  'animal:write': ['SUPERADMIN', 'OWNER', 'ADMIN', 'MANAGER', 'STAFF'],
+  'animal:delete': ['SUPERADMIN', 'OWNER', 'ADMIN', 'MANAGER'],
   
   // Organization permissions
-  'org:read': ['OWNER', 'ADMIN', 'MANAGER', 'STAFF', 'VETERINARIAN', 'VET_TECH', 'VOLUNTEER', 'FOSTER', 'READ_ONLY'],
-  'org:write': ['OWNER', 'ADMIN'],
-  'org:users': ['OWNER', 'ADMIN', 'MANAGER'],
+  'org:read': ['SUPERADMIN', 'OWNER', 'ADMIN', 'MANAGER', 'STAFF', 'VOLUNTEER', 'READ_ONLY'],
+  'org:write': ['SUPERADMIN', 'OWNER', 'ADMIN'],
+  'org:create': ['SUPERADMIN'],
+  'org:users': ['SUPERADMIN', 'OWNER', 'ADMIN', 'MANAGER'],
   
-  // Import permissions
-  'import:read': ['OWNER', 'ADMIN', 'MANAGER'],
-  'import:write': ['OWNER', 'ADMIN', 'MANAGER'],
+  // Join request permissions
+  'join:read': ['SUPERADMIN'],
+  'join:write': ['SUPERADMIN'],
   
-  // Webhook permissions
-  'webhook:read': ['OWNER', 'ADMIN'],
-  'webhook:write': ['OWNER', 'ADMIN'],
+  // Transfer permissions
+  'transfer:read': ['SUPERADMIN', 'OWNER', 'ADMIN', 'MANAGER', 'STAFF'],
+  'transfer:write': ['SUPERADMIN', 'OWNER', 'ADMIN', 'MANAGER'],
   
-  // API key permissions
-  'apikey:read': ['OWNER', 'ADMIN'],
-  'apikey:write': ['OWNER', 'ADMIN'],
+  // Data export/import
+  'data:read': ['SUPERADMIN', 'OWNER', 'ADMIN', 'MANAGER'],
+  'data:write': ['SUPERADMIN', 'OWNER', 'ADMIN'],
 } as const;
 
 export type Permission = keyof typeof Permissions;
@@ -74,212 +91,143 @@ export function hasPermission(role: string, permission: Permission): boolean {
 }
 
 /**
- * Authentication middleware
+ * Check if user has permission (checks both global and org role)
  */
-export async function authMiddleware(
+export function userHasPermission(
   request: FastifyRequest,
-  reply: FastifyReply
-) {
-  // Skip auth for public paths
-  if (PUBLIC_PATHS.some(path => request.url.startsWith(path))) {
-    return;
+  permission: Permission
+): boolean {
+  if (!request.user) return false;
+  
+  // SUPERADMIN can do anything
+  if (request.user.globalRole === 'SUPERADMIN') return true;
+  
+  // Check organization role
+  if (request.user.organizationRole) {
+    return hasPermission(request.user.organizationRole, permission);
   }
   
-  try {
-    // Try JWT authentication first
+  return false;
+}
+
+/**
+ * Optional auth middleware - sets user if token present, but doesn't require it
+ */
+export function optionalAuth(): preHandlerHookHandler {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
     const authHeader = request.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      await authenticateJWT(request, authHeader.substring(7));
+    
+    if (!authHeader?.startsWith('Bearer ')) {
+      // No token - continue as anonymous
+      request.user = undefined;
       return;
     }
     
-    // Try API key authentication for allowed paths
-    const apiKey = request.headers['x-api-key'];
-    if (apiKey && API_KEY_PATHS.some(path => request.url.startsWith(path))) {
-      await authenticateApiKey(request, apiKey.toString());
-      return;
+    try {
+      const decoded = await request.jwtVerify<{
+        sub: string;
+        email: string;
+        name: string;
+        globalRole: string;
+        orgId?: string;
+        orgRole?: string;
+      }>();
+      
+      request.user = {
+        id: decoded.sub,
+        email: decoded.email,
+        name: decoded.name,
+        globalRole: decoded.globalRole,
+        organizationId: decoded.orgId,
+        organizationRole: decoded.orgRole,
+      };
+    } catch (error) {
+      // Invalid token - continue as anonymous
+      logger.debug({ error }, 'Invalid token, continuing as anonymous');
+      request.user = undefined;
     }
-    
-    // No valid authentication
-    throw new UnauthorizedError('Authentication required');
-  } catch (error) {
-    if (error instanceof UnauthorizedError || error instanceof ForbiddenError) {
-      throw error;
-    }
-    logger.error({ error }, 'Authentication error');
-    throw new UnauthorizedError('Authentication failed');
-  }
-}
-
-/**
- * Authenticate via JWT token
- */
-async function authenticateJWT(request: FastifyRequest, token: string) {
-  try {
-    // Verify JWT
-    const decoded = await request.jwtVerify<{
-      sub: string;
-      email: string;
-      name: string;
-      orgId?: string;
-      role?: string;
-    }>();
-    
-    // Load user from database
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.sub },
-      include: {
-        organizations: {
-          include: {
-            organization: true,
-          },
-        },
-      },
-    });
-    
-    if (!user || user.status !== 'ACTIVE') {
-      throw new UnauthorizedError('User not found or inactive');
-    }
-    
-    // Set user on request
-    request.user = {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: decoded.role,
-    };
-    
-    // Set organization context if specified
-    const orgId = decoded.orgId ?? request.headers['x-organization-id']?.toString();
-    if (orgId) {
-      const membership = user.organizations.find(o => o.organizationId === orgId);
-      if (membership) {
-        request.organization = {
-          id: membership.organization.id,
-          name: membership.organization.name,
-          slug: membership.organization.slug,
-        };
-        request.user.role = membership.role;
-      }
-    } else if (user.organizations.length > 0) {
-      // Use primary organization or first one
-      const primary = user.organizations.find(o => o.isPrimary) ?? user.organizations[0];
-      if (primary) {
-        request.organization = {
-          id: primary.organization.id,
-          name: primary.organization.name,
-          slug: primary.organization.slug,
-        };
-        request.user.role = primary.role;
-      }
-    }
-    
-    logger.debug({
-      userId: user.id,
-      orgId: request.organization?.id,
-      role: request.user.role,
-    }, 'JWT authentication successful');
-  } catch (error: any) {
-    if (error.code === 'FST_JWT_NO_AUTHORIZATION_IN_HEADER' || 
-        error.code === 'FST_JWT_AUTHORIZATION_TOKEN_EXPIRED') {
-      throw new UnauthorizedError('Token expired');
-    }
-    throw error;
-  }
-}
-
-/**
- * Authenticate via API key
- */
-async function authenticateApiKey(request: FastifyRequest, key: string) {
-  // API keys are prefixed (e.g., "sk_live_abc123...")
-  const keyPrefix = key.substring(0, 16);
-  
-  // Find API key by prefix
-  const apiKey = await prisma.apiKey.findFirst({
-    where: {
-      keyPrefix,
-      isActive: true,
-      OR: [
-        { expiresAt: null },
-        { expiresAt: { gt: new Date() } },
-      ],
-    },
-    include: {
-      organization: true,
-    },
-  });
-  
-  if (!apiKey) {
-    throw new UnauthorizedError('Invalid API key');
-  }
-  
-  // Verify key hash
-  const isValid = await bcrypt.compare(key, apiKey.keyHash);
-  if (!isValid) {
-    throw new UnauthorizedError('Invalid API key');
-  }
-  
-  // Update last used
-  await prisma.apiKey.update({
-    where: { id: apiKey.id },
-    data: { lastUsedAt: new Date() },
-  });
-  
-  // Set organization context
-  request.organization = {
-    id: apiKey.organization.id,
-    name: apiKey.organization.name,
-    slug: apiKey.organization.slug,
   };
-  
-  // API keys get a service account user
-  request.user = {
-    id: `api:${apiKey.id}`,
-    email: `api@${apiKey.organization.slug}.shelterlink.org`,
-    name: `API: ${apiKey.name}`,
-    role: 'STAFF', // API keys default to staff role, scoped by their scopes
-  };
-  
-  logger.debug({
-    apiKeyId: apiKey.id,
-    orgId: apiKey.organization.id,
-  }, 'API key authentication successful');
 }
 
 /**
- * Require authentication decorator
+ * Require authentication middleware
  */
-export function requireAuth() {
+export function requireAuth(): preHandlerHookHandler {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    const authHeader = request.headers.authorization;
+    
+    if (!authHeader?.startsWith('Bearer ')) {
+      throw new UnauthorizedError('Authentication required');
+    }
+    
+    try {
+      const decoded = await request.jwtVerify<{
+        sub: string;
+        email: string;
+        name: string;
+        globalRole: string;
+        orgId?: string;
+        orgRole?: string;
+      }>();
+      
+      request.user = {
+        id: decoded.sub,
+        email: decoded.email,
+        name: decoded.name,
+        globalRole: decoded.globalRole,
+        organizationId: decoded.orgId,
+        organizationRole: decoded.orgRole,
+      };
+    } catch (error) {
+      logger.error({ error }, 'JWT verification failed');
+      throw new UnauthorizedError('Invalid or expired token');
+    }
+  };
+}
+
+/**
+ * Require specific permission middleware
+ */
+export function requirePermission(permission: Permission): preHandlerHookHandler {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    // First ensure user is authenticated
+    if (!request.user) {
+      throw new UnauthorizedError('Authentication required');
+    }
+    
+    // Check permission
+    if (!userHasPermission(request, permission)) {
+      throw new ForbiddenError(`Permission denied: ${permission}`);
+    }
+  };
+}
+
+/**
+ * Require SUPERADMIN role
+ */
+export function requireSuperAdmin(): preHandlerHookHandler {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.user) {
-      throw new UnauthorizedError();
-    }
-  };
-}
-
-/**
- * Require permission decorator
- */
-export function requirePermission(permission: Permission) {
-  return async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!request.user) {
-      throw new UnauthorizedError();
+      throw new UnauthorizedError('Authentication required');
     }
     
-    if (!request.user.role || !hasPermission(request.user.role, permission)) {
-      throw new ForbiddenError(`Missing permission: ${permission}`);
+    if (request.user.globalRole !== 'SUPERADMIN') {
+      throw new ForbiddenError('Superadmin access required');
     }
   };
 }
 
 /**
- * Require organization context decorator
+ * Require organization membership
  */
-export function requireOrganization() {
+export function requireOrganization(): preHandlerHookHandler {
   return async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!request.organization) {
-      throw new ForbiddenError('Organization context required');
+    if (!request.user) {
+      throw new UnauthorizedError('Authentication required');
+    }
+    
+    if (!request.user.organizationId) {
+      throw new ForbiddenError('Organization membership required');
     }
   };
 }

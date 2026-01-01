@@ -1,44 +1,33 @@
 /**
- * Risk Routes
+ * Risk Routes (Prototype)
  * 
- * Risk assessment and urgency management
+ * Simplified risk assessment endpoints.
+ * 
+ * TODO (Production):
+ * - Add kennel stress tracking
+ * - Add medical/behavioral score inputs
+ * - Integrate ML-based predictions
+ * - Add historical risk tracking
+ * - Add admin override capabilities
  */
 
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import { prisma } from '@shelter-link/database';
-import { NotFoundError, ForbiddenError } from '../lib/errors.js';
-import { requireAuth, requirePermission, requireOrganization } from '../middleware/auth.js';
-import { createAuditLog } from '../middleware/audit.js';
-import { calculateRiskScore, recalculateOrganizationRiskScores } from '../services/risk-scoring.js';
+import { requireAuth, requireOrganization, requirePermission, optionalAuth } from '../middleware/auth.js';
+import { calculateRiskScore, updateAnimalRiskProfile, recalculateOrganizationRiskProfiles } from '../services/risk-scoring.js';
 
-const quickUpdateSchema = z.object({
-  kennelStressLevel: z.enum(['NONE', 'MILD', 'MODERATE', 'SEVERE', 'CRITICAL']).optional(),
-  medicalScore: z.number().int().min(0).max(10).optional(),
-  behavioralScore: z.number().int().min(0).max(10).optional(),
-  notes: z.string().optional(),
-});
-
-const overrideSchema = z.object({
-  urgencyScore: z.number().int().min(0).max(100),
-  riskSeverity: z.enum(['CRITICAL', 'HIGH', 'ELEVATED', 'MODERATE', 'LOW']),
-  reason: z.string().min(10),
-  publicVisibility: z.boolean().optional(),
-  rescueVisibility: z.boolean().optional(),
-});
+// ============================================================================
+// Routes
+// ============================================================================
 
 export async function riskRoutes(app: FastifyInstance) {
-  app.addHook('preHandler', requireAuth());
 
   /**
-   * Get risk profile for animal
+   * GET /risk/animals/:id
+   * Get risk profile for a specific animal
    */
   app.get('/animals/:id', {
-    schema: {
-      description: 'Get risk profile for an animal',
-      tags: ['Risk'],
-      security: [{ bearerAuth: [] }],
-    },
+    preHandler: [optionalAuth()],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     
@@ -50,294 +39,257 @@ export async function riskRoutes(app: FastifyInstance) {
             id: true,
             name: true,
             species: true,
-            organizationId: true,
             intakeDate: true,
             daysInShelter: true,
+            ageCategory: true,
+            size: true,
+            colorPrimary: true,
+            specialNeeds: true,
+            organization: {
+              select: { id: true, name: true, slug: true },
+            },
           },
         },
       },
     });
     
     if (!profile) {
-      throw new NotFoundError('Risk profile', id);
+      return reply.status(404).send({
+        success: false,
+        error: 'Risk profile not found',
+      });
+    }
+    
+    // Parse risk reasons JSON
+    let reasons: string[] = [];
+    try {
+      reasons = JSON.parse(profile.riskReasons || '[]');
+    } catch {
+      reasons = [];
     }
     
     return {
       success: true,
-      data: profile,
+      data: {
+        animalId: profile.animalId,
+        urgencyScore: profile.urgencyScore,
+        riskSeverity: profile.riskSeverity,
+        riskReasons: reasons,
+        lengthOfStay: profile.lengthOfStay,
+        isSenior: profile.isSenior,
+        hasSpecialNeeds: profile.hasSpecialNeeds,
+        lastCalculated: profile.lastCalculated.toISOString(),
+        animal: profile.animal,
+        // Explain the score
+        explanation: getScoreExplanation(profile.urgencyScore, reasons),
+      },
     };
   });
 
   /**
-   * Quick update risk factors (minimal cognitive effort for staff)
+   * POST /risk/animals/:id/recalculate
+   * Recalculate risk score for a specific animal
    */
-  app.patch('/animals/:id/quick-update', {
-    preHandler: [requireOrganization(), requirePermission('animal:write')],
-    schema: {
-      description: 'Quick update risk factors for staff efficiency',
-      tags: ['Risk'],
-      security: [{ bearerAuth: [] }],
-    },
+  app.post('/animals/:id/recalculate', {
+    preHandler: [requireAuth(), requireOrganization()],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = quickUpdateSchema.parse(request.body);
+    const orgId = request.organization!.id;
     
     // Verify animal belongs to org
     const animal = await prisma.animal.findUnique({
       where: { id },
-      include: { riskProfile: true },
     });
     
     if (!animal) {
-      throw new NotFoundError('Animal', id);
-    }
-    
-    if (animal.organizationId !== request.organization!.id) {
-      throw new ForbiddenError('Access denied');
-    }
-    
-    // Update profile
-    const updated = await prisma.riskProfile.update({
-      where: { animalId: id },
-      data: {
-        kennelStressLevel: body.kennelStressLevel,
-        medicalScore: body.medicalScore,
-        behavioralScore: body.behavioralScore,
-        lastCalculated: new Date(),
-      },
-    });
-    
-    // Recalculate composite score
-    const newScore = await calculateRiskScore(id);
-    await prisma.riskProfile.update({
-      where: { animalId: id },
-      data: {
-        urgencyScore: newScore.urgencyScore,
-        riskSeverity: newScore.riskSeverity,
-        riskReasons: newScore.riskReasons,
-      },
-    });
-    
-    // Log if there was a note
-    if (body.notes) {
-      await prisma.animalNote.create({
-        data: {
-          animalId: id,
-          category: 'ALERT',
-          content: body.notes,
-          authorId: request.user!.id,
-          author: request.user!.name,
-        },
+      return reply.status(404).send({
+        success: false,
+        error: 'Animal not found',
       });
     }
     
-    // Create event
-    await prisma.animalEvent.create({
-      data: {
-        animalId: id,
-        eventType: 'RISK_UPDATED',
-        payload: body,
-        actorId: request.user!.id,
-        actor: request.user!.name,
-        organizationId: request.organization!.id,
-      },
-    });
+    if (animal.organizationId !== orgId) {
+      return reply.status(403).send({
+        success: false,
+        error: 'Access denied',
+      });
+    }
+    
+    // Recalculate
+    const result = await updateAnimalRiskProfile(id);
     
     return {
       success: true,
-      data: {
-        urgencyScore: newScore.urgencyScore,
-        riskSeverity: newScore.riskSeverity,
-      },
+      data: result,
     };
   });
 
   /**
-   * Manual override of risk score
+   * POST /risk/organization/recalculate
+   * Recalculate all risk scores for organization
    */
-  app.post('/animals/:id/override', {
-    preHandler: [requireOrganization(), requirePermission('animal:write')],
-    schema: {
-      description: 'Manually override risk score',
-      tags: ['Risk'],
-      security: [{ bearerAuth: [] }],
-    },
-  }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const body = overrideSchema.parse(request.body);
-    
-    const animal = await prisma.animal.findUnique({
-      where: { id },
-      include: { riskProfile: true },
-    });
-    
-    if (!animal) {
-      throw new NotFoundError('Animal', id);
-    }
-    
-    if (animal.organizationId !== request.organization!.id) {
-      throw new ForbiddenError('Access denied');
-    }
-    
-    const previousScore = animal.riskProfile?.urgencyScore ?? 0;
-    
-    const updated = await prisma.riskProfile.update({
-      where: { animalId: id },
-      data: {
-        urgencyScore: body.urgencyScore,
-        riskSeverity: body.riskSeverity,
-        isManualOverride: true,
-        overrideReason: body.reason,
-        overrideBy: request.user!.id,
-        publicVisibility: body.publicVisibility,
-        rescueVisibility: body.rescueVisibility,
-        lastCalculated: new Date(),
-      },
-    });
-    
-    // Create event
-    await prisma.animalEvent.create({
-      data: {
-        animalId: id,
-        eventType: 'RISK_OVERRIDDEN',
-        payload: {
-          previousScore,
-          newScore: body.urgencyScore,
-          reason: body.reason,
-        },
-        actorId: request.user!.id,
-        actor: request.user!.name,
-        organizationId: request.organization!.id,
-      },
-    });
-    
-    await createAuditLog(request, 'OVERRIDE', 'risk_profile', id);
-    
-    return {
-      success: true,
-      data: updated,
-    };
-  });
-
-  /**
-   * Recalculate risk scores for organization
-   */
-  app.post('/recalculate', {
-    preHandler: [requireOrganization(), requirePermission('org:write')],
-    schema: {
-      description: 'Recalculate all risk scores for organization',
-      tags: ['Risk'],
-      security: [{ bearerAuth: [] }],
-    },
+  app.post('/organization/recalculate', {
+    preHandler: [requireAuth(), requireOrganization(), requirePermission('org:write')],
   }, async (request, reply) => {
     const orgId = request.organization!.id;
     
-    const updated = await recalculateOrganizationRiskScores(orgId);
-    
-    await createAuditLog(request, 'RECALCULATE', 'risk_profile', orgId);
+    const results = await recalculateOrganizationRiskProfiles(orgId);
     
     return {
       success: true,
       data: {
-        updated,
-        message: `Recalculated ${updated} risk scores`,
+        totalAnimals: results.total,
+        recalculated: results.updated,
+        errors: results.errors,
+        message: `Recalculated risk scores for ${results.updated} animals`,
       },
     };
   });
 
   /**
-   * Get risk summary/dashboard for organization
+   * GET /risk/summary
+   * Get risk summary for organization
    */
-  app.get('/dashboard', {
-    preHandler: [requireOrganization()],
-    schema: {
-      description: 'Get risk dashboard for organization',
-      tags: ['Risk'],
-      security: [{ bearerAuth: [] }],
-    },
+  app.get('/summary', {
+    preHandler: [requireAuth(), requireOrganization()],
   }, async (request, reply) => {
     const orgId = request.organization!.id;
     
-    // Get counts by severity
-    const [severityCounts, topAtRisk, recentChanges] = await Promise.all([
-      prisma.riskProfile.groupBy({
-        by: ['riskSeverity'],
-        where: {
-          animal: {
-            organizationId: orgId,
-            status: { in: ['IN_SHELTER', 'IN_FOSTER', 'IN_MEDICAL', 'AVAILABLE'] },
-          },
-        },
-        _count: true,
-      }),
-      
-      // Top 10 at-risk animals
-      prisma.animal.findMany({
-        where: {
-          organizationId: orgId,
-          status: { in: ['IN_SHELTER', 'IN_FOSTER', 'IN_MEDICAL', 'AVAILABLE'] },
-          riskProfile: {
-            urgencyScore: { gte: 60 },
-          },
-        },
-        include: {
-          riskProfile: true,
-          media: {
-            where: { isPrimary: true },
-            take: 1,
-          },
-        },
-        orderBy: {
-          riskProfile: { urgencyScore: 'desc' },
-        },
-        take: 10,
-      }),
-      
-      // Recent risk changes (animals that crossed thresholds)
-      prisma.animalEvent.findMany({
-        where: {
-          organizationId: orgId,
-          eventType: { in: ['RISK_UPDATED', 'RISK_OVERRIDDEN'] },
-          occurredAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-        },
-        include: {
-          animal: {
-            select: { id: true, name: true, species: true },
-          },
-        },
-        orderBy: { occurredAt: 'desc' },
-        take: 20,
-      }),
-    ]);
+    // Get animals with their risk profiles
+    const animals = await prisma.animal.findMany({
+      where: {
+        organizationId: orgId,
+        status: { in: ['AVAILABLE', 'MEDICAL_HOLD', 'BEHAVIORAL_HOLD'] },
+      },
+      include: {
+        riskProfile: true,
+      },
+    });
+    
+    // Count by severity
+    const bySeverity = {
+      CRITICAL: 0,
+      HIGH: 0,
+      ELEVATED: 0,
+      MODERATE: 0,
+      LOW: 0,
+    };
+    
+    for (const animal of animals) {
+      const severity = animal.riskProfile?.riskSeverity as keyof typeof bySeverity;
+      if (severity && bySeverity[severity] !== undefined) {
+        bySeverity[severity]++;
+      }
+    }
+    
+    // Get top at-risk animals
+    const topAtRisk = animals
+      .filter(a => a.riskProfile)
+      .sort((a, b) => (b.riskProfile?.urgencyScore ?? 0) - (a.riskProfile?.urgencyScore ?? 0))
+      .slice(0, 5)
+      .map(a => ({
+        id: a.id,
+        name: a.name,
+        species: a.species,
+        urgencyScore: a.riskProfile?.urgencyScore,
+        riskSeverity: a.riskProfile?.riskSeverity,
+        daysInShelter: a.daysInShelter,
+      }));
     
     return {
       success: true,
       data: {
-        summary: {
-          critical: severityCounts.find(s => s.riskSeverity === 'CRITICAL')?._count ?? 0,
-          high: severityCounts.find(s => s.riskSeverity === 'HIGH')?._count ?? 0,
-          elevated: severityCounts.find(s => s.riskSeverity === 'ELEVATED')?._count ?? 0,
-          moderate: severityCounts.find(s => s.riskSeverity === 'MODERATE')?._count ?? 0,
-          low: severityCounts.find(s => s.riskSeverity === 'LOW')?._count ?? 0,
-        },
-        topAtRisk: topAtRisk.map(a => ({
-          id: a.id,
-          name: a.name,
-          species: a.species,
-          urgencyScore: a.riskProfile!.urgencyScore,
-          riskSeverity: a.riskProfile!.riskSeverity,
-          daysInShelter: a.daysInShelter,
-          primaryPhotoUrl: a.media[0]?.url ?? null,
-        })),
-        recentChanges: recentChanges.map(e => ({
-          animalId: e.animal.id,
-          animalName: e.animal.name,
-          eventType: e.eventType,
-          payload: e.payload,
-          occurredAt: e.occurredAt.toISOString(),
-        })),
-        generatedAt: new Date().toISOString(),
+        totalAnimals: animals.length,
+        bySeverity,
+        topAtRisk,
+        criticalCount: bySeverity.CRITICAL,
+        highRiskCount: bySeverity.CRITICAL + bySeverity.HIGH,
       },
     };
   });
+
+  /**
+   * GET /risk/factors
+   * Get explanation of risk factors used in scoring
+   */
+  app.get('/factors', async (request, reply) => {
+    return {
+      success: true,
+      data: {
+        factors: [
+          {
+            name: 'Length of Stay',
+            weight: 40,
+            description: 'Animals with longer shelter stays face increased risk',
+            thresholds: [
+              { days: 60, score: 'Maximum (40 points)' },
+              { days: 30, score: 'High (25 points)' },
+              { days: 14, score: 'Moderate (scaled)' },
+            ],
+          },
+          {
+            name: 'Senior Status',
+            weight: 20,
+            description: 'Senior and geriatric animals are often overlooked',
+            applies: 'SENIOR and GERIATRIC age categories',
+          },
+          {
+            name: 'Special Needs',
+            weight: 20,
+            description: 'Animals with medical or behavioral needs require more resources',
+            applies: 'Any animal with documented special needs',
+          },
+          {
+            name: 'Large Breed Dogs',
+            weight: 10,
+            description: 'Large and extra-large dogs face adoption challenges',
+            applies: 'LARGE and EXTRA_LARGE dogs only',
+          },
+          {
+            name: 'Black Animal Bias',
+            weight: 10,
+            description: 'Black animals are statistically adopted at lower rates',
+            applies: 'Animals with black as primary color',
+          },
+        ],
+        severityLevels: [
+          { level: 'CRITICAL', minScore: 80, action: 'Immediate intervention needed' },
+          { level: 'HIGH', minScore: 60, action: 'Priority attention required' },
+          { level: 'ELEVATED', minScore: 40, action: 'Close monitoring recommended' },
+          { level: 'MODERATE', minScore: 20, action: 'Standard care protocols' },
+          { level: 'LOW', minScore: 0, action: 'Routine monitoring' },
+        ],
+      },
+    };
+  });
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function getScoreExplanation(score: number, reasons: string[]): string {
+  const reasonLabels: Record<string, string> = {
+    'LONG_LOS': 'extended shelter stay',
+    'SENIOR': 'senior status',
+    'SPECIAL_NEEDS': 'special needs',
+    'LARGE_BREED': 'large breed challenges',
+    'BLACK_ANIMAL': 'black animal bias',
+  };
+  
+  const readableReasons = reasons
+    .map(r => reasonLabels[r] || r)
+    .join(', ');
+  
+  if (score >= 80) {
+    return `CRITICAL: This animal needs immediate attention due to ${readableReasons || 'multiple risk factors'}.`;
+  } else if (score >= 60) {
+    return `HIGH RISK: Priority placement needed. Contributing factors: ${readableReasons || 'elevated risk indicators'}.`;
+  } else if (score >= 40) {
+    return `ELEVATED: Enhanced visibility recommended due to ${readableReasons || 'moderate risk factors'}.`;
+  } else if (score >= 20) {
+    return `MODERATE: Standard care with attention to ${readableReasons || 'typical adoption timeline'}.`;
+  } else {
+    return `LOW: Good adoption prospects expected.`;
+  }
 }

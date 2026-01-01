@@ -1,24 +1,26 @@
 /**
- * Shelter Link API Server
+ * Shelter Link API Server (Prototype)
  * 
- * Main entry point for the REST API
+ * Simplified API for local development.
+ * 
+ * Changes from production:
+ *   - SQLite database
+ *   - Local file storage
+ *   - No Redis/caching
+ *   - Simplified auth (no refresh tokens)
+ *   - Removed import/webhook routes (archived)
  */
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
-import rateLimit from '@fastify/rate-limit';
-import swagger from '@fastify/swagger';
-import swaggerUI from '@fastify/swagger-ui';
 import multipart from '@fastify/multipart';
-import websocket from '@fastify/websocket';
+import fastifyStatic from '@fastify/static';
+import path from 'path';
+import fs from 'fs';
 
-import { config } from './config/index.js';
-import { logger } from './lib/logger.js';
+import { logger as pinoLogger } from './lib/logger.js';
 import { errorHandler } from './lib/errors.js';
-import { auditMiddleware } from './middleware/audit.js';
-import { authMiddleware } from './middleware/auth.js';
 
 // Routes
 import { healthRoutes } from './routes/health.js';
@@ -26,152 +28,84 @@ import { authRoutes } from './routes/auth.js';
 import { animalRoutes } from './routes/animals.js';
 import { organizationRoutes } from './routes/organizations.js';
 import { transferRoutes } from './routes/transfers.js';
-import { importRoutes } from './routes/import.js';
-import { webhookRoutes } from './routes/webhooks.js';
 import { riskRoutes } from './routes/risk.js';
+import { dataRoutes } from './routes/data.js';
+
+// Environment config
+const PORT = parseInt(process.env.PORT ?? '4000', 10);
+const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-in-production-min-32-chars';
+const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:3000';
 
 // Create Fastify instance
 const app = Fastify({
-  logger: logger,
+  logger: pinoLogger,
   requestIdHeader: 'x-request-id',
-  requestIdLogLabel: 'requestId',
   genReqId: () => crypto.randomUUID(),
 });
 
+// Ensure uploads directory exists
+const uploadsDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
 // Register plugins
 async function registerPlugins() {
-  // Security
-  await app.register(helmet, {
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        scriptSrc: ["'self'"],
-        imgSrc: ["'self'", 'data:', 'https:'],
-      },
-    },
-  });
-
   // CORS
   await app.register(cors, {
-    origin: config.cors.origins,
+    origin: CORS_ORIGIN.split(','),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Organization-ID'],
-  });
-
-  // Rate limiting
-  await app.register(rateLimit, {
-    max: config.rateLimit.max,
-    timeWindow: '1 minute',
-    keyGenerator: (request) => {
-      // Rate limit by API key if present, otherwise by IP
-      return request.headers['x-api-key']?.toString() ?? request.ip;
-    },
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
   });
 
   // JWT authentication
   await app.register(jwt, {
-    secret: config.jwt.secret,
+    secret: JWT_SECRET,
     sign: {
-      expiresIn: config.jwt.expiresIn,
+      expiresIn: '7d',
     },
   });
 
-  // Multipart uploads
+  // Multipart file uploads
   await app.register(multipart, {
     limits: {
-      fileSize: 50 * 1024 * 1024, // 50MB max
+      fileSize: 10 * 1024 * 1024, // 10MB max
       files: 10,
     },
   });
 
-  // WebSocket support
-  await app.register(websocket);
-
-  // OpenAPI documentation
-  await app.register(swagger, {
-    openapi: {
-      openapi: '3.1.0',
-      info: {
-        title: 'Shelter Link API',
-        description: 'Unified Humane Animal Shelter Platform API',
-        version: '1.0.0',
-        contact: {
-          name: 'Shelter Link Team',
-          email: 'api@shelterlink.org',
-        },
-        license: {
-          name: 'MIT',
-          url: 'https://opensource.org/licenses/MIT',
-        },
-      },
-      servers: [
-        {
-          url: config.api.baseUrl,
-          description: 'API Server',
-        },
-      ],
-      tags: [
-        { name: 'Animals', description: 'Animal management operations' },
-        { name: 'Organizations', description: 'Shelter and rescue organization management' },
-        { name: 'Transfers', description: 'Cross-shelter transfer requests' },
-        { name: 'Risk', description: 'Risk assessment and urgency scoring' },
-        { name: 'Import', description: 'Data ingestion and import operations' },
-        { name: 'Webhooks', description: 'Webhook management for integrations' },
-        { name: 'Auth', description: 'Authentication and authorization' },
-      ],
-      components: {
-        securitySchemes: {
-          bearerAuth: {
-            type: 'http',
-            scheme: 'bearer',
-            bearerFormat: 'JWT',
-          },
-          apiKey: {
-            type: 'apiKey',
-            in: 'header',
-            name: 'X-API-Key',
-          },
-        },
-      },
-    },
+  // Serve uploaded files
+  await app.register(fastifyStatic, {
+    root: uploadsDir,
+    prefix: '/uploads/',
+    decorateReply: false,
   });
-
-  await app.register(swaggerUI, {
-    routePrefix: '/docs',
-    uiConfig: {
-      docExpansion: 'list',
-      deepLinking: true,
-    },
-  });
-}
-
-// Register middleware
-async function registerMiddleware() {
-  // Audit logging
-  app.addHook('onRequest', auditMiddleware);
-  
-  // Auth middleware (decorates request with organization)
-  app.decorateRequest('organization', null);
-  app.addHook('onRequest', authMiddleware);
 }
 
 // Register routes
 async function registerRoutes() {
   // Health check (public)
   await app.register(healthRoutes, { prefix: '/api' });
-  
-  // Auth routes (public)
+  await app.register(healthRoutes, { prefix: '/' }); // Also at root
+
+  // Auth routes
   await app.register(authRoutes, { prefix: '/api/auth' });
-  
-  // Protected routes
+
+  // Animal routes (public read, auth write)
   await app.register(animalRoutes, { prefix: '/api/animals' });
+
+  // Organization routes (includes join requests)
   await app.register(organizationRoutes, { prefix: '/api/organizations' });
+
+  // Transfer routes
   await app.register(transferRoutes, { prefix: '/api/transfers' });
+
+  // Risk routes
   await app.register(riskRoutes, { prefix: '/api/risk' });
-  await app.register(importRoutes, { prefix: '/api/import' });
-  await app.register(webhookRoutes, { prefix: '/api/webhooks' });
+
+  // Data export/import routes
+  await app.register(dataRoutes, { prefix: '/api/data' });
 }
 
 // Error handler
@@ -181,25 +115,36 @@ app.setErrorHandler(errorHandler);
 async function start() {
   try {
     await registerPlugins();
-    await registerMiddleware();
     await registerRoutes();
 
     await app.listen({
-      port: config.api.port,
+      port: PORT,
       host: '0.0.0.0',
     });
 
-    logger.info(`🐾 Shelter Link API running on port ${config.api.port}`);
-    logger.info(`📚 API docs available at ${config.api.baseUrl}/docs`);
+    console.log(`
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║   🐾 Shelter Link API (Prototype)                             ║
+║                                                               ║
+║   Server:    http://localhost:${PORT}                           ║
+║   Health:    http://localhost:${PORT}/health                    ║
+║                                                               ║
+║   Demo Credentials:                                           ║
+║     Admin:      admin@happypaws.org / password123             ║
+║     Superadmin: superadmin@shelterlink.org / admin123         ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
+    `);
   } catch (err) {
-    logger.error(err, 'Failed to start server');
+    console.error('Failed to start server:', err);
     process.exit(1);
   }
 }
 
 // Graceful shutdown
 async function shutdown() {
-  logger.info('Shutting down gracefully...');
+  console.log('Shutting down gracefully...');
   await app.close();
   process.exit(0);
 }

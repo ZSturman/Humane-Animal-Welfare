@@ -1,484 +1,581 @@
 /**
- * Database Seed Script
+ * Database Seed Script (Prototype)
  * 
- * Populates the database with sample data for development and testing.
- * Run with: npx prisma db seed
+ * Creates demo data for local development:
+ * - 1 Superadmin user
+ * - 2 Organizations
+ * - 3 Users with different roles
+ * - 15+ Animals with varied risk levels
+ * - Sample photos, transfers, and join requests
  * 
- * This script creates:
- * - 3 organizations (1 main shelter + 2 partners)
- * - 3 locations for the main shelter
- * - 3 users with different roles
- * - 45 animals with risk profiles
- * - 5 transfer requests between organizations
+ * Run with: npm run db:seed
  */
 
-import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-// ============================================================================
-// UUID CONSTANTS
-// ============================================================================
-// Fixed UUIDs for consistent seed data
-const ORG_001 = '00000000-0000-0000-0000-000000000001';
-const ORG_002 = '00000000-0000-0000-0000-000000000002';
-const ORG_003 = '00000000-0000-0000-0000-000000000003';
+// Helper to hash passwords
+async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 10);
+}
 
-const LOC_001 = '00000000-0000-0000-0001-000000000001';
-const LOC_002 = '00000000-0000-0000-0001-000000000002';
-const LOC_003 = '00000000-0000-0000-0001-000000000003';
-
-const USER_001 = '00000000-0000-0000-0002-000000000001';
-const USER_002 = '00000000-0000-0000-0002-000000000002';
-const USER_003 = '00000000-0000-0000-0002-000000000003';
-
-// Helper to generate consistent IDs
-const generateId = () => crypto.randomUUID();
-
-// Helper to get random date in past
-const daysAgo = (days: number): Date => {
+// Helper to get date X days ago
+function daysAgo(days: number): Date {
   const date = new Date();
   date.setDate(date.getDate() - days);
   return date;
-};
+}
 
-// Helper to get random item from array
-const randomItem = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
-
-// Helper to get random number in range
-const randomInt = (min: number, max: number): number => 
-  Math.floor(Math.random() * (max - min + 1)) + min;
-
-// ============================================================================
-// ORGANIZATION DATA
-// ============================================================================
-
-const organizations = [
-  {
-    id: ORG_001,
-    name: 'Happy Paws Shelter',
-    slug: 'happy-paws',
-    type: 'PRIVATE_SHELTER' as const,
-    status: 'ACTIVE' as const,
-    address: {
-      street: '123 Main Street',
-      city: 'Springfield',
-      state: 'IL',
-      zip: '62701',
-      country: 'US',
-    },
-    latitude: 39.7817,
-    longitude: -89.6501,
-    timezone: 'America/Chicago',
-    phone: '(555) 123-4567',
-    email: 'info@happypaws.org',
-    website: 'https://happypaws.org',
-  },
-  {
-    id: ORG_002,
-    name: 'Second Chance Rescue',
-    slug: 'second-chance',
-    type: 'RESCUE' as const,
-    status: 'ACTIVE' as const,
-    address: {
-      street: '456 Oak Avenue',
-      city: 'Chicago',
-      state: 'IL',
-      zip: '60601',
-      country: 'US',
-    },
-    latitude: 41.8781,
-    longitude: -87.6298,
-    timezone: 'America/Chicago',
-    phone: '(555) 234-5678',
-    email: 'info@secondchance.org',
-    website: 'https://secondchance.org',
-  },
-  {
-    id: ORG_003,
-    name: 'Midwest Humane Society',
-    slug: 'midwest-humane',
-    type: 'PRIVATE_SHELTER' as const,
-    status: 'ACTIVE' as const,
-    address: {
-      street: '789 Elm Street',
-      city: 'Indianapolis',
-      state: 'IN',
-      zip: '46201',
-      country: 'US',
-    },
-    latitude: 39.7684,
-    longitude: -86.1581,
-    timezone: 'America/Indiana/Indianapolis',
-    phone: '(555) 345-6789',
-    email: 'info@midwesthumane.org',
-    website: 'https://midwesthumane.org',
-  },
-];
-
-// ============================================================================
-// LOCATION DATA
-// ============================================================================
-
-const locations = [
-  {
-    id: LOC_001,
-    organizationId: ORG_001,
-    name: 'Main Building',
-    type: 'KENNEL' as const,
-    capacity: { DOG: 50 },
-    occupancy: { DOG: 35 },
-  },
-  {
-    id: LOC_002,
-    organizationId: ORG_001,
-    name: 'Cat House',
-    type: 'CATTERY' as const,
-    capacity: { CAT: 30 },
-    occupancy: { CAT: 22 },
-  },
-  {
-    id: LOC_003,
-    organizationId: ORG_001,
-    name: 'Small Animal Wing',
-    type: 'MAIN_BUILDING' as const,
-    capacity: { RABBIT: 10, GUINEA_PIG: 10, BIRD: 5 },
-    occupancy: { RABBIT: 4, GUINEA_PIG: 4, BIRD: 0 },
-  },
-];
-
-// ============================================================================
-// USER DATA
-// ============================================================================
-
-const users = [
-  {
-    id: USER_001,
-    email: 'admin@happypaws.org',
-    passwordHash: '$2b$10$dummyHashForDevelopmentOnly', // "password123" in production use proper hashing
-    name: 'Sarah Johnson',
-    role: 'ADMIN' as const,
-    organizationId: ORG_001,
-  },
-  {
-    id: USER_002,
-    email: 'staff@happypaws.org',
-    passwordHash: '$2b$10$dummyHashForDevelopmentOnly',
-    name: 'Mike Chen',
-    role: 'STAFF' as const,
-    organizationId: ORG_001,
-  },
-  {
-    id: USER_003,
-    email: 'volunteer@happypaws.org',
-    passwordHash: '$2b$10$dummyHashForDevelopmentOnly',
-    name: 'Emily Davis',
-    role: 'VOLUNTEER' as const,
-    organizationId: ORG_001,
-  },
-];
-
-// ============================================================================
-// ANIMAL DATA
-// ============================================================================
-
-const dogNames = ['Max', 'Bella', 'Charlie', 'Luna', 'Buddy', 'Daisy', 'Rocky', 'Molly', 'Duke', 'Sadie'];
-const catNames = ['Luna', 'Oliver', 'Milo', 'Cleo', 'Leo', 'Nala', 'Simba', 'Willow', 'Felix', 'Chloe'];
-const dogBreeds = ['Golden Retriever', 'Labrador', 'German Shepherd', 'Pit Bull Mix', 'Beagle', 'Boxer', 'Husky', 'Australian Shepherd'];
-const catBreeds = ['Domestic Shorthair', 'Siamese', 'Maine Coon', 'Persian', 'Tabby', 'Calico', 'Tuxedo'];
-const colors = ['Black', 'White', 'Brown', 'Golden', 'Gray', 'Orange', 'Cream', 'Brindle', 'Spotted'];
-
-// Generate 45 animals
-const generateAnimals = () => {
-  const animals: any[] = [];
-  
-  // Dogs (20)
-  for (let i = 0; i < 20; i++) {
-    const daysInShelter = randomInt(1, 120);
-    const weightLb = randomInt(20, 80);
-    animals.push({
-      id: generateId(),
-      name: dogNames[i % dogNames.length] + (i >= 10 ? ` ${Math.floor(i / 10) + 1}` : ''),
-      species: 'DOG',
-      breedPrimary: randomItem(dogBreeds),
-      sex: i % 2 === 0 ? 'MALE' : 'FEMALE',
-      weightKg: weightLb * 0.453592, // Convert pounds to kg
-      colorPrimary: randomItem(colors),
-      status: 'IN_SHELTER',
-      intakeDate: daysAgo(daysInShelter),
-      organizationId: ORG_001,
-      locationId: LOC_001,
-      photoUrl: `https://picsum.photos/seed/dog${i}/400/300`,
-      daysInShelter,
-    });
-  }
-  
-  // Cats (15)
-  for (let i = 0; i < 15; i++) {
-    const daysInShelter = randomInt(1, 90);
-    const weightLb = randomInt(6, 15);
-    animals.push({
-      id: generateId(),
-      name: catNames[i % catNames.length] + (i >= 10 ? ` ${Math.floor(i / 10) + 1}` : ''),
-      species: 'CAT',
-      breedPrimary: randomItem(catBreeds),
-      sex: i % 2 === 0 ? 'MALE' : 'FEMALE',
-      weightKg: weightLb * 0.453592, // Convert pounds to kg
-      colorPrimary: randomItem(colors),
-      status: 'IN_SHELTER',
-      intakeDate: daysAgo(daysInShelter),
-      organizationId: ORG_001,
-      locationId: LOC_002,
-      photoUrl: `https://picsum.photos/seed/cat${i}/400/300`,
-      daysInShelter,
-    });
-  }
-  
-  // Small animals (10)
-  const smallAnimals = [
-    { species: 'RABBIT', names: ['Thumper', 'Cinnamon', 'Snowball', 'Oreo'] },
-    { species: 'GUINEA_PIG', names: ['Peanut', 'Butterscotch', 'Patches', 'Squeaky'] },
-    { species: 'BIRD', names: ['Sunny', 'Sky'] },
-  ];
-  
-  let smallIdx = 36;
-  for (const { species, names } of smallAnimals) {
-    for (const name of names) {
-      const daysInShelter = randomInt(1, 60);
-      const weightLb = species === 'BIRD' ? 0.1 : randomInt(1, 4);
-      animals.push({
-        id: generateId(),
-        name,
-        species,
-        breedPrimary: species === 'RABBIT' ? 'Holland Lop' : species === 'GUINEA_PIG' ? 'American' : 'Parakeet',
-        sex: smallIdx % 2 === 0 ? 'MALE' : 'FEMALE',
-        weightKg: weightLb * 0.453592, // Convert pounds to kg
-        colorPrimary: randomItem(['White', 'Brown', 'Gray', 'Mixed']),
-        status: 'IN_SHELTER',
-        intakeDate: daysAgo(daysInShelter),
-        organizationId: ORG_001,
-        locationId: LOC_003,
-        photoUrl: `https://picsum.photos/seed/${species.toLowerCase()}${smallIdx}/400/300`,
-        daysInShelter,
-      });
-    }
-  }
-  
-  return animals;
-};
-
-// ============================================================================
-// RISK PROFILE DATA
-// ============================================================================
-
-const calculateRiskProfile = (animal: any) => {
-  let urgencyScore = 0;
-  const riskReasons: string[] = [];
-  
-  // Length of Stay Score (0-40 points)
-  let losScore = 0;
-  if (animal.daysInShelter >= 90) {
-    losScore = 40;
-    riskReasons.push('In shelter 90+ days (critical)');
-  } else if (animal.daysInShelter >= 60) {
-    losScore = 30;
-    riskReasons.push('In shelter 60+ days');
-  } else if (animal.daysInShelter >= 30) {
-    losScore = 20;
-    riskReasons.push('In shelter 30+ days');
-  }
-  
-  // Random medical/behavioral scores for variety
-  const medicalScore = randomInt(0, 10);
-  const behavioralScore = randomInt(0, 10);
-  
-  if (medicalScore >= 7) riskReasons.push('Medical needs');
-  if (behavioralScore >= 7) riskReasons.push('Behavioral challenges');
-  
-  urgencyScore = losScore + (medicalScore * 3) + (behavioralScore * 3);
-  
-  let riskSeverity: 'CRITICAL' | 'HIGH' | 'ELEVATED' | 'MODERATE' | 'LOW';
-  if (urgencyScore >= 80) riskSeverity = 'CRITICAL';
-  else if (urgencyScore >= 60) riskSeverity = 'HIGH';
-  else if (urgencyScore >= 40) riskSeverity = 'ELEVATED';
-  else if (urgencyScore >= 20) riskSeverity = 'MODERATE';
-  else riskSeverity = 'LOW';
-  
-  return {
-    animalId: animal.id,
-    urgencyScore,
-    riskSeverity,
-    riskReasons,
-    lengthOfStay: animal.daysInShelter,
-    medicalScore,
-    behavioralScore,
-  };
-};
-
-// ============================================================================
-// TRANSFER DATA
-// ============================================================================
-// MAIN SEED FUNCTION
-// ============================================================================
-// MAIN SEED FUNCTION
-// ============================================================================
+// Random helper
+function randomItem<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
 
 async function main() {
-  console.log('🌱 Starting database seed...\n');
-  
-  // Clear existing data (in reverse order of dependencies)
-  console.log('🗑️  Clearing existing data...');
+  console.log('🌱 Seeding database...\n');
+
+  // Clear existing data
   await prisma.transferRequest.deleteMany();
+  await prisma.outcomeEvent.deleteMany();
+  await prisma.intakeEvent.deleteMany();
+  await prisma.animalPhoto.deleteMany();
   await prisma.riskProfile.deleteMany();
   await prisma.animal.deleteMany();
+  await prisma.joinRequest.deleteMany();
   await prisma.userOrganization.deleteMany();
   await prisma.user.deleteMany();
-  await prisma.location.deleteMany();
   await prisma.organization.deleteMany();
-  
-  // Seed Organizations
-  console.log('🏢 Creating organizations...');
-  for (const org of organizations) {
-    await prisma.organization.create({
-      data: org as any,
-    });
-  }
-  console.log(`   ✓ Created ${organizations.length} organizations`);
-  
-  // Seed Locations
-  console.log('📍 Creating locations...');
-  for (const loc of locations) {
-    await prisma.location.create({
-      data: loc as any,
-    });
-  }
-  console.log(`   ✓ Created ${locations.length} locations`);
-  
-  // Seed Users
-  console.log('👤 Creating users...');
-  for (const user of users) {
-    const { organizationId, role, ...userData } = user;
-    const createdUser = await prisma.user.create({
-      data: userData as any,
-    });
-    await prisma.userOrganization.create({
-      data: {
-        userId: createdUser.id,
-        organizationId,
-        role,
-      } as any,
-    });
-  }
-  console.log(`   ✓ Created ${users.length} users`);
-  
-  // Seed Animals
-  console.log('🐾 Creating animals...');
-  const animals = generateAnimals();
-  for (const animal of animals) {
-    const { daysInShelter, photoUrl, ...animalData } = animal;
-    await prisma.animal.create({
-      data: {
-        ...animalData,
-        media: photoUrl ? {
-          create: {
-            type: 'PHOTO',
-            url: photoUrl,
-            isPrimary: true,
-          },
-        } : undefined,
-      } as any,
-    });
-  }
-  console.log(`   ✓ Created ${animals.length} animals`);
-  
-  // Seed Risk Profiles
-  console.log('⚠️  Calculating risk profiles...');
-  for (const animal of animals) {
-    const riskProfile = calculateRiskProfile(animal);
-    await prisma.riskProfile.create({
-      data: riskProfile as any,
-    });
-  }
-  console.log(`   ✓ Created ${animals.length} risk profiles`);
-  
-  // Seed Transfers
-  console.log('🔄 Creating transfer requests...');
-  // Use actual animal IDs from created animals
-  const transferData = [
+
+  // ============================================================================
+  // ORGANIZATIONS
+  // ============================================================================
+  console.log('Creating organizations...');
+
+  const happyPaws = await prisma.organization.create({
+    data: {
+      name: 'Happy Paws Shelter',
+      slug: 'happy-paws',
+      type: 'PRIVATE_SHELTER',
+      status: 'ACTIVE',
+      address: '123 Main Street',
+      city: 'Springfield',
+      state: 'IL',
+      zipCode: '62701',
+      latitude: 39.7817,
+      longitude: -89.6501,
+      phone: '(555) 123-4567',
+      email: 'info@happypaws.org',
+      website: 'https://happypaws.org',
+      capacity: 150,
+    },
+  });
+
+  const secondChance = await prisma.organization.create({
+    data: {
+      name: 'Second Chance Rescue',
+      slug: 'second-chance',
+      type: 'RESCUE',
+      status: 'ACTIVE',
+      address: '456 Oak Avenue',
+      city: 'Chicago',
+      state: 'IL',
+      zipCode: '60601',
+      latitude: 41.8781,
+      longitude: -87.6298,
+      phone: '(555) 234-5678',
+      email: 'info@secondchance.org',
+      website: 'https://secondchance.org',
+      capacity: 50,
+    },
+  });
+
+  console.log(`  ✓ Created: ${happyPaws.name}`);
+  console.log(`  ✓ Created: ${secondChance.name}\n`);
+
+  // ============================================================================
+  // USERS
+  // ============================================================================
+  console.log('Creating users...');
+
+  // Superadmin (global, not tied to org)
+  const superadmin = await prisma.user.create({
+    data: {
+      email: 'superadmin@shelterlink.org',
+      passwordHash: await hashPassword('admin123'),
+      name: 'Super Admin',
+      globalRole: 'SUPERADMIN',
+      status: 'ACTIVE',
+    },
+  });
+
+  // Admin at Happy Paws
+  const adminUser = await prisma.user.create({
+    data: {
+      email: 'admin@happypaws.org',
+      passwordHash: await hashPassword('password123'),
+      name: 'Sarah Johnson',
+      phone: '(555) 111-1111',
+      globalRole: 'PUBLIC',
+      status: 'ACTIVE',
+    },
+  });
+
+  await prisma.userOrganization.create({
+    data: {
+      userId: adminUser.id,
+      organizationId: happyPaws.id,
+      role: 'ADMIN',
+      isPrimary: true,
+    },
+  });
+
+  // Staff at Happy Paws
+  const staffUser = await prisma.user.create({
+    data: {
+      email: 'volunteer@happypaws.org',
+      passwordHash: await hashPassword('password123'),
+      name: 'Mike Thompson',
+      globalRole: 'PUBLIC',
+      status: 'ACTIVE',
+    },
+  });
+
+  await prisma.userOrganization.create({
+    data: {
+      userId: staffUser.id,
+      organizationId: happyPaws.id,
+      role: 'VOLUNTEER',
+      isPrimary: true,
+    },
+  });
+
+  // Admin at Second Chance
+  const rescueAdmin = await prisma.user.create({
+    data: {
+      email: 'admin@secondchance.org',
+      passwordHash: await hashPassword('password123'),
+      name: 'Lisa Chen',
+      globalRole: 'PUBLIC',
+      status: 'ACTIVE',
+    },
+  });
+
+  await prisma.userOrganization.create({
+    data: {
+      userId: rescueAdmin.id,
+      organizationId: secondChance.id,
+      role: 'ADMIN',
+      isPrimary: true,
+    },
+  });
+
+  console.log(`  ✓ Superadmin: superadmin@shelterlink.org / admin123`);
+  console.log(`  ✓ Admin:      admin@happypaws.org / password123`);
+  console.log(`  ✓ Volunteer:  volunteer@happypaws.org / password123`);
+  console.log(`  ✓ Rescue:     admin@secondchance.org / password123\n`);
+
+  // ============================================================================
+  // ANIMALS
+  // ============================================================================
+  console.log('Creating animals...');
+
+  const animals = [
+    // CRITICAL risk - long stay dogs
     {
-      animalId: animals[0].id,
-      fromOrganizationId: ORG_001,
-      toOrganizationId: ORG_002,
-      status: 'PENDING',
-      reason: 'Capacity relief - shelter at 95% capacity',
-      transportNotes: `${animals[0].name} is a friendly dog who needs more space to run.`,
-      requestedAt: daysAgo(3),
+      name: 'Shadow',
+      species: 'DOG',
+      breedPrimary: 'German Shepherd',
+      breedSecondary: 'Labrador',
+      sex: 'MALE',
+      ageCategory: 'SENIOR',
+      size: 'LARGE',
+      colorPrimary: 'Black',
+      description: 'Shadow is a gentle giant who loves long walks and belly rubs. He is looking for a quiet home where he can spend his golden years.',
+      specialNeeds: 'Requires daily medication for arthritis',
+      intakeDaysAgo: 90,
+      status: 'AVAILABLE',
     },
     {
-      animalId: animals[4].id,
-      fromOrganizationId: ORG_002,
-      toOrganizationId: ORG_001,
-      status: 'APPROVED',
-      reason: 'Medical resources available at destination',
-      medicalSummary: `${animals[4].name} needs specialized care.`,
-      requestedAt: daysAgo(7),
-      respondedAt: daysAgo(5),
+      name: 'Midnight',
+      species: 'CAT',
+      breedPrimary: 'Domestic Shorthair',
+      sex: 'FEMALE',
+      ageCategory: 'ADULT',
+      size: 'MEDIUM',
+      colorPrimary: 'Black',
+      description: 'Midnight is a beautiful black cat with mesmerizing green eyes. She loves to cuddle and would make a perfect companion.',
+      intakeDaysAgo: 75,
+      status: 'AVAILABLE',
     },
     {
-      animalId: animals[9].id,
-      fromOrganizationId: ORG_001,
-      toOrganizationId: ORG_003,
-      status: 'IN_TRANSIT',
-      reason: 'Breed-specific rescue placement',
-      transportNotes: `${animals[9].name} is being transferred to a breed-specific rescue.`,
-      requestedAt: daysAgo(14),
-      respondedAt: daysAgo(10),
-      scheduledDate: daysAgo(1),
+      name: 'Duke',
+      species: 'DOG',
+      breedPrimary: 'Pit Bull',
+      breedSecondary: 'Mastiff',
+      sex: 'MALE',
+      ageCategory: 'ADULT',
+      size: 'EXTRA_LARGE',
+      colorPrimary: 'Brindle',
+      description: 'Duke is a big lovable goofball who thinks he\'s a lap dog. Great with kids!',
+      intakeDaysAgo: 65,
+      status: 'AVAILABLE',
+    },
+
+    // HIGH risk
+    {
+      name: 'Whiskers',
+      species: 'CAT',
+      breedPrimary: 'Persian',
+      sex: 'MALE',
+      ageCategory: 'GERIATRIC',
+      size: 'MEDIUM',
+      colorPrimary: 'White',
+      description: 'Whiskers is a dignified senior gentleman who enjoys a peaceful environment.',
+      specialNeeds: 'Needs regular grooming',
+      intakeDaysAgo: 45,
+      status: 'AVAILABLE',
     },
     {
-      animalId: animals[20].id,
-      fromOrganizationId: ORG_003,
-      toOrganizationId: ORG_001,
-      status: 'COMPLETED',
-      reason: 'Foster availability',
-      transportNotes: `${animals[20].name} has been successfully transferred and is now in foster care.`,
-      requestedAt: daysAgo(21),
-      respondedAt: daysAgo(18),
-      completedAt: daysAgo(14),
+      name: 'Bear',
+      species: 'DOG',
+      breedPrimary: 'Great Dane',
+      sex: 'MALE',
+      ageCategory: 'ADULT',
+      size: 'EXTRA_LARGE',
+      colorPrimary: 'Black',
+      description: 'Bear is gentle despite his imposing size. He loves children and other dogs.',
+      intakeDaysAgo: 50,
+      status: 'AVAILABLE',
+    },
+
+    // ELEVATED risk
+    {
+      name: 'Luna',
+      species: 'DOG',
+      breedPrimary: 'Husky',
+      breedSecondary: 'Malamute',
+      sex: 'FEMALE',
+      ageCategory: 'YOUNG',
+      size: 'LARGE',
+      colorPrimary: 'Gray',
+      colorSecondary: 'White',
+      description: 'Luna is an energetic and playful pup who needs an active family.',
+      intakeDaysAgo: 35,
+      status: 'AVAILABLE',
     },
     {
-      animalId: animals[24].id,
-      fromOrganizationId: ORG_001,
-      toOrganizationId: ORG_002,
-      status: 'PENDING',
-      reason: 'Behavioral resources needed',
-      behavioralSummary: `${animals[24].name} needs specialized behavioral training.`,
-      requestedAt: daysAgo(1),
+      name: 'Oliver',
+      species: 'CAT',
+      breedPrimary: 'Maine Coon',
+      sex: 'MALE',
+      ageCategory: 'SENIOR',
+      size: 'LARGE',
+      colorPrimary: 'Orange',
+      description: 'Oliver is a majestic fluffball who rules the cat room with a velvet paw.',
+      intakeDaysAgo: 28,
+      status: 'AVAILABLE',
+    },
+
+    // MODERATE risk
+    {
+      name: 'Bella',
+      species: 'DOG',
+      breedPrimary: 'Golden Retriever',
+      sex: 'FEMALE',
+      ageCategory: 'ADULT',
+      size: 'LARGE',
+      colorPrimary: 'Golden',
+      description: 'Bella is the perfect family dog - friendly, patient, and loves everyone.',
+      goodWithChildren: true,
+      goodWithDogs: true,
+      goodWithCats: true,
+      intakeDaysAgo: 18,
+      status: 'AVAILABLE',
+    },
+    {
+      name: 'Mochi',
+      species: 'CAT',
+      breedPrimary: 'Scottish Fold',
+      sex: 'FEMALE',
+      ageCategory: 'YOUNG',
+      size: 'SMALL',
+      colorPrimary: 'Cream',
+      description: 'Mochi is an adorable kitten with the cutest folded ears you\'ve ever seen.',
+      intakeDaysAgo: 14,
+      status: 'AVAILABLE',
+    },
+    {
+      name: 'Rocky',
+      species: 'DOG',
+      breedPrimary: 'Boxer',
+      sex: 'MALE',
+      ageCategory: 'ADULT',
+      size: 'LARGE',
+      colorPrimary: 'Fawn',
+      description: 'Rocky is an athletic, loyal companion who would excel in an active home.',
+      intakeDaysAgo: 21,
+      status: 'AVAILABLE',
+    },
+
+    // LOW risk - new arrivals
+    {
+      name: 'Daisy',
+      species: 'DOG',
+      breedPrimary: 'Beagle',
+      sex: 'FEMALE',
+      ageCategory: 'BABY',
+      size: 'SMALL',
+      colorPrimary: 'Tricolor',
+      description: 'Daisy is an adorable beagle puppy with boundless energy and curiosity.',
+      intakeDaysAgo: 5,
+      status: 'AVAILABLE',
+    },
+    {
+      name: 'Simba',
+      species: 'CAT',
+      breedPrimary: 'Abyssinian',
+      sex: 'MALE',
+      ageCategory: 'YOUNG',
+      size: 'MEDIUM',
+      colorPrimary: 'Ruddy',
+      description: 'Simba is a playful, intelligent cat who loves interactive toys.',
+      intakeDaysAgo: 7,
+      status: 'AVAILABLE',
+    },
+    {
+      name: 'Coco',
+      species: 'DOG',
+      breedPrimary: 'French Bulldog',
+      sex: 'FEMALE',
+      ageCategory: 'YOUNG',
+      size: 'SMALL',
+      colorPrimary: 'Brindle',
+      description: 'Coco is a charming Frenchie who loves cuddles and short walks.',
+      intakeDaysAgo: 3,
+      status: 'AVAILABLE',
+    },
+
+    // Other species
+    {
+      name: 'Thumper',
+      species: 'RABBIT',
+      breedPrimary: 'Holland Lop',
+      sex: 'MALE',
+      ageCategory: 'ADULT',
+      size: 'SMALL',
+      colorPrimary: 'Gray',
+      description: 'Thumper is a friendly rabbit who enjoys being held and petted.',
+      intakeDaysAgo: 20,
+      status: 'AVAILABLE',
+    },
+    {
+      name: 'Patches',
+      species: 'GUINEA_PIG',
+      breedPrimary: 'American',
+      sex: 'FEMALE',
+      ageCategory: 'ADULT',
+      size: 'TINY',
+      colorPrimary: 'Brown',
+      colorSecondary: 'White',
+      description: 'Patches loves vegetables and making happy squeaking sounds!',
+      intakeDaysAgo: 15,
+      status: 'AVAILABLE',
+    },
+
+    // Animals at Second Chance Rescue
+    {
+      name: 'Max',
+      species: 'DOG',
+      breedPrimary: 'Border Collie',
+      sex: 'MALE',
+      ageCategory: 'ADULT',
+      size: 'MEDIUM',
+      colorPrimary: 'Black',
+      colorSecondary: 'White',
+      description: 'Max is incredibly intelligent and needs mental stimulation.',
+      intakeDaysAgo: 12,
+      status: 'IN_FOSTER',
+      orgIndex: 1, // Second Chance
+    },
+    {
+      name: 'Ginger',
+      species: 'CAT',
+      breedPrimary: 'Tabby',
+      sex: 'FEMALE',
+      ageCategory: 'SENIOR',
+      size: 'MEDIUM',
+      colorPrimary: 'Orange',
+      description: 'Ginger is a sweet senior lady looking for a quiet forever home.',
+      intakeDaysAgo: 30,
+      status: 'AVAILABLE',
+      orgIndex: 1,
     },
   ];
-  
-  for (const transfer of transferData) {
-    await prisma.transferRequest.create({
-      data: transfer as any,
+
+  const orgs = [happyPaws, secondChance];
+  const createdAnimals = [];
+
+  for (const animalData of animals) {
+    const org = orgs[animalData.orgIndex ?? 0];
+    
+    const animal = await prisma.animal.create({
+      data: {
+        organizationId: org.id,
+        name: animalData.name,
+        species: animalData.species,
+        breedPrimary: animalData.breedPrimary,
+        breedSecondary: animalData.breedSecondary ?? null,
+        sex: animalData.sex,
+        ageCategory: animalData.ageCategory,
+        size: animalData.size,
+        colorPrimary: animalData.colorPrimary,
+        colorSecondary: animalData.colorSecondary ?? null,
+        status: animalData.status,
+        description: animalData.description,
+        specialNeeds: animalData.specialNeeds ?? null,
+        goodWithChildren: animalData.goodWithChildren ?? null,
+        goodWithDogs: animalData.goodWithDogs ?? null,
+        goodWithCats: animalData.goodWithCats ?? null,
+        intakeDate: daysAgo(animalData.intakeDaysAgo),
+        daysInShelter: animalData.intakeDaysAgo,
+        isPublic: true,
+        adoptionFee: animalData.species === 'DOG' ? 25000 : 15000, // $250 / $150 in cents
+      },
     });
+
+    // Create intake event
+    await prisma.intakeEvent.create({
+      data: {
+        animalId: animal.id,
+        organizationId: org.id,
+        intakeType: randomItem(['STRAY', 'OWNER_SURRENDER', 'TRANSFER_IN']),
+        intakeDate: animal.intakeDate,
+        condition: 'HEALTHY',
+        processedBy: 'System Import',
+      },
+    });
+
+    // Calculate and create risk profile
+    const urgencyScore = calculateRiskScore(animalData);
+    const riskSeverity = getSeverity(urgencyScore);
+    const riskReasons = getRiskReasons(animalData);
+
+    await prisma.riskProfile.create({
+      data: {
+        animalId: animal.id,
+        urgencyScore,
+        riskSeverity,
+        riskReasons: JSON.stringify(riskReasons),
+        lengthOfStay: animalData.intakeDaysAgo,
+        isSenior: ['SENIOR', 'GERIATRIC'].includes(animalData.ageCategory),
+        hasSpecialNeeds: Boolean(animalData.specialNeeds),
+      },
+    });
+
+    createdAnimals.push(animal);
   }
-  console.log(`   ✓ Created ${transferData.length} transfer requests`);
+
+  console.log(`  ✓ Created ${createdAnimals.length} animals with risk profiles\n`);
+
+  // ============================================================================
+  // TRANSFER REQUEST
+  // ============================================================================
+  console.log('Creating sample transfer request...');
+
+  await prisma.transferRequest.create({
+    data: {
+      animalId: createdAnimals[0].id, // Shadow
+      fromOrganizationId: happyPaws.id,
+      toOrganizationId: secondChance.id,
+      status: 'PENDING',
+      urgency: 'HIGH',
+      reason: 'Shadow needs specialized senior care that Second Chance can provide.',
+      requestedByName: 'Sarah Johnson',
+    },
+  });
+
+  console.log('  ✓ Created pending transfer request\n');
+
+  // ============================================================================
+  // JOIN REQUEST
+  // ============================================================================
+  console.log('Creating sample join request...');
+
+  await prisma.joinRequest.create({
+    data: {
+      organizationName: 'Midwest Humane Society',
+      organizationType: 'MUNICIPAL_SHELTER',
+      contactName: 'John Davis',
+      contactEmail: 'jdavis@midwesthumane.org',
+      contactPhone: '(555) 345-6789',
+      city: 'Decatur',
+      state: 'IL',
+      message: 'We would love to join ShelterLink to help find homes for our animals.',
+      estimatedAnimals: 200,
+      status: 'PENDING',
+    },
+  });
+
+  console.log('  ✓ Created pending join request\n');
+
+  console.log('✅ Database seeded successfully!\n');
+  console.log('Demo accounts:');
+  console.log('  Superadmin: superadmin@shelterlink.org / admin123');
+  console.log('  Admin:      admin@happypaws.org / password123');
+  console.log('  Volunteer:  volunteer@happypaws.org / password123');
+}
+
+// Simple risk score calculation for seed data
+function calculateRiskScore(animal: any): number {
+  let score = 0;
   
-  console.log('\n✅ Database seeded successfully!');
-  console.log('\n📊 Summary:');
-  console.log(`   Organizations: ${organizations.length}`);
-  console.log(`   Locations: ${locations.length}`);
-  console.log(`   Users: ${users.length}`);
-  console.log(`   Animals: ${animals.length}`);
-  console.log(`   Risk Profiles: ${animals.length}`);
-  console.log(`   Transfers: 5`);
+  // Length of stay (40%)
+  const losRatio = animal.intakeDaysAgo / 30;
+  if (losRatio >= 2) score += 40;
+  else if (losRatio >= 1) score += 25;
+  else score += losRatio * 20;
+
+  // Senior (20%)
+  if (['SENIOR', 'GERIATRIC'].includes(animal.ageCategory)) score += 20;
+
+  // Special needs (20%)
+  if (animal.specialNeeds) score += 20;
+
+  // Large breed dog (10%)
+  if (animal.species === 'DOG' && ['LARGE', 'EXTRA_LARGE'].includes(animal.size)) score += 10;
+
+  // Black animal (10%)
+  if (animal.colorPrimary?.toLowerCase() === 'black') score += 10;
+
+  return Math.min(100, Math.round(score));
+}
+
+function getSeverity(score: number): string {
+  if (score >= 80) return 'CRITICAL';
+  if (score >= 60) return 'HIGH';
+  if (score >= 40) return 'ELEVATED';
+  if (score >= 20) return 'MODERATE';
+  return 'LOW';
+}
+
+function getRiskReasons(animal: any): string[] {
+  const reasons: string[] = [];
+  if (animal.intakeDaysAgo >= 30) reasons.push('LONG_LOS');
+  if (['SENIOR', 'GERIATRIC'].includes(animal.ageCategory)) reasons.push('SENIOR');
+  if (animal.specialNeeds) reasons.push('SPECIAL_NEEDS');
+  if (animal.species === 'DOG' && ['LARGE', 'EXTRA_LARGE'].includes(animal.size)) reasons.push('LARGE_BREED');
+  if (animal.colorPrimary?.toLowerCase() === 'black') reasons.push('BLACK_ANIMAL');
+  return reasons;
 }
 
 main()
-  .catch((e) => {
-    console.error('❌ Seed failed:', e);
-    process.exit(1);
-  })
-  .finally(async () => {
+  .then(async () => {
     await prisma.$disconnect();
+  })
+  .catch(async (e) => {
+    console.error(e);
+    await prisma.$disconnect();
+    process.exit(1);
   });
