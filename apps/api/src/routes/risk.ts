@@ -23,6 +23,80 @@ import { calculateRiskScore, updateAnimalRiskProfile, recalculateOrganizationRis
 export async function riskRoutes(app: FastifyInstance) {
 
   /**
+   * GET /risk/dashboard
+   * Get risk dashboard for authenticated user's organization or global (superadmin)
+   */
+  app.get('/dashboard', {
+    preHandler: [requireAuth()],
+  }, async (request, reply) => {
+    const user = request.user!;
+    const orgId = user.organizationId;
+    
+    // If superadmin, show all organizations
+    // If staff, show only their organization
+    let where: any = {};
+    if (user.globalRole !== 'SUPERADMIN' && orgId) {
+      where.organizationId = orgId;
+    }
+    
+    // Get animals with their risk profiles
+    const animals = await prisma.animal.findMany({
+      where: {
+        ...where,
+        status: { in: ['AVAILABLE', 'MEDICAL_HOLD', 'BEHAVIORAL_HOLD'] },
+      },
+      include: {
+        riskProfile: true,
+        organization: {
+          select: { id: true, name: true, slug: true },
+        },
+      },
+    });
+    
+    // Count by severity
+    const bySeverity = {
+      CRITICAL: 0,
+      HIGH: 0,
+      ELEVATED: 0,
+      MODERATE: 0,
+      LOW: 0,
+    };
+    
+    for (const animal of animals) {
+      const severity = animal.riskProfile?.riskSeverity as keyof typeof bySeverity;
+      if (severity && bySeverity[severity] !== undefined) {
+        bySeverity[severity]++;
+      }
+    }
+    
+    // Get top at-risk animals
+    const topAtRisk = animals
+      .filter(a => a.riskProfile)
+      .sort((a, b) => (b.riskProfile?.urgencyScore ?? 0) - (a.riskProfile?.urgencyScore ?? 0))
+      .slice(0, 10)
+      .map(a => ({
+        id: a.id,
+        name: a.name,
+        species: a.species,
+        urgencyScore: a.riskProfile?.urgencyScore,
+        riskSeverity: a.riskProfile?.riskSeverity,
+        daysInShelter: a.daysInShelter,
+        organizationName: a.organization.name,
+      }));
+    
+    return {
+      success: true,
+      data: {
+        totalAnimals: animals.length,
+        bySeverity,
+        criticalCount: bySeverity.CRITICAL,
+        highRiskCount: bySeverity.CRITICAL + bySeverity.HIGH,
+        topAtRisk,
+      },
+    };
+  });
+
+  /**
    * GET /risk/animals/:id
    * Get risk profile for a specific animal
    */
@@ -94,7 +168,7 @@ export async function riskRoutes(app: FastifyInstance) {
     preHandler: [requireAuth(), requireOrganization()],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const orgId = request.organization!.id;
+    const orgId = request.user!.organizationId!;
     
     // Verify animal belongs to org
     const animal = await prisma.animal.findUnique({
@@ -131,7 +205,7 @@ export async function riskRoutes(app: FastifyInstance) {
   app.post('/organization/recalculate', {
     preHandler: [requireAuth(), requireOrganization(), requirePermission('org:write')],
   }, async (request, reply) => {
-    const orgId = request.organization!.id;
+    const orgId = request.user!.organizationId!;
     
     const results = await recalculateOrganizationRiskProfiles(orgId);
     
@@ -153,7 +227,7 @@ export async function riskRoutes(app: FastifyInstance) {
   app.get('/summary', {
     preHandler: [requireAuth(), requireOrganization()],
   }, async (request, reply) => {
-    const orgId = request.organization!.id;
+    const orgId = request.user!.organizationId!;
     
     // Get animals with their risk profiles
     const animals = await prisma.animal.findMany({

@@ -49,7 +49,7 @@ export async function transferRoutes(app: FastifyInstance) {
       tags: ['Transfers'],
     },
   }, async (request, reply) => {
-    const orgId = request.organization!.id;
+    const orgId = request.user!.organizationId!;
     const { direction, status } = request.query as { direction?: string; status?: string };
     
     // Build query
@@ -89,7 +89,7 @@ export async function transferRoutes(app: FastifyInstance) {
           select: { id: true, name: true, slug: true, city: true, state: true },
         },
       },
-      orderBy: { requestedAt: 'desc' },
+      orderBy: { createdAt: 'desc' },
     });
     
     return {
@@ -125,7 +125,7 @@ export async function transferRoutes(app: FastifyInstance) {
   app.get('/pending', {
     preHandler: [requireAuth(), requireOrganization()],
   }, async (request, reply) => {
-    const orgId = request.organization!.id;
+    const orgId = request.user!.organizationId!;
     
     const count = await prisma.transferRequest.count({
       where: {
@@ -145,7 +145,7 @@ export async function transferRoutes(app: FastifyInstance) {
     preHandler: [requireAuth(), requireOrganization()],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const orgId = request.organization!.id;
+    const orgId = request.user!.organizationId!;
     
     const transfer = await prisma.transferRequest.findUnique({
       where: { id },
@@ -198,7 +198,7 @@ export async function transferRoutes(app: FastifyInstance) {
     preHandler: [requireAuth(), requireOrganization(), requirePermission('transfer:write')],
   }, async (request, reply) => {
     const body = createTransferSchema.parse(request.body);
-    const fromOrgId = request.organization!.id;
+    const fromOrgId = request.user!.organizationId!;
     const user = request.user!;
     
     // Verify animal exists and belongs to user's org
@@ -309,7 +309,7 @@ export async function transferRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = respondSchema.parse(request.body);
-    const orgId = request.organization!.id;
+    const orgId = request.user!.organizationId!;
     const user = request.user!;
     
     const transfer = await prisma.transferRequest.findUnique({
@@ -407,7 +407,7 @@ export async function transferRoutes(app: FastifyInstance) {
   app.get('/organizations', {
     preHandler: [requireAuth(), requireOrganization()],
   }, async (request, reply) => {
-    const myOrgId = request.organization!.id;
+    const myOrgId = request.user!.organizationId!;
     
     const orgs = await prisma.organization.findMany({
       where: {

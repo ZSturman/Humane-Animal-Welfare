@@ -79,7 +79,7 @@ export default function Dashboard() {
     },
   });
 
-  const totalAtRisk = riskData
+  const totalAtRisk = riskData?.summary
     ? riskData.summary.critical + riskData.summary.high
     : 0;
 
@@ -109,7 +109,7 @@ export default function Dashboard() {
                 {totalAtRisk} animals need urgent attention
               </p>
               <p className="text-sm text-red-700">
-                {riskData?.summary.critical} critical, {riskData?.summary.high} high risk
+                {riskData?.summary?.critical} critical, {riskData?.summary?.high} high risk
               </p>
             </div>
             <Link to="/at-risk" className="btn btn-danger btn-sm">
@@ -123,34 +123,34 @@ export default function Dashboard() {
           <StatCard
             icon={PawPrint}
             label="Animals in Care"
-            value={orgStats?.animals.total ?? 0}
+            value={orgStats?.animals?.total ?? 0}
             loading={statsLoading}
             color="blue"
           />
           <StatCard
             icon={Heart}
             label="Adoptions This Month"
-            value={orgStats?.adoptions.thisMonth ?? 0}
-            change={orgStats ? orgStats.adoptions.thisMonth - orgStats.adoptions.lastMonth : 0}
+            value={orgStats?.adoptions?.thisMonth ?? 0}
+            change={orgStats?.adoptions ? orgStats.adoptions.thisMonth - orgStats.adoptions.lastMonth : 0}
             loading={statsLoading}
             color="green"
           />
           <StatCard
             icon={ArrowLeftRight}
             label="Pending Transfers"
-            value={orgStats?.transfers.pending ?? 0}
+            value={orgStats?.transfers?.pending ?? 0}
             loading={statsLoading}
             color="purple"
           />
           <StatCard
             icon={TrendingUp}
             label="Capacity"
-            value={`${orgStats?.capacity.percentage ?? 0}%`}
+            value={`${orgStats?.capacity?.percentage ?? 0}%`}
             loading={statsLoading}
             color={
-              (orgStats?.capacity.percentage ?? 0) > 90
+              (orgStats?.capacity?.percentage ?? 0) > 90
                 ? 'red'
-                : (orgStats?.capacity.percentage ?? 0) > 75
+                : (orgStats?.capacity?.percentage ?? 0) > 75
                 ? 'yellow'
                 : 'green'
             }
@@ -167,27 +167,27 @@ export default function Dashboard() {
             <div className="card-body space-y-3">
               <RiskRow
                 severity="critical"
-                count={riskData?.summary.critical ?? 0}
+                count={riskData?.summary?.critical ?? 0}
                 loading={riskLoading}
               />
               <RiskRow
                 severity="high"
-                count={riskData?.summary.high ?? 0}
+                count={riskData?.summary?.high ?? 0}
                 loading={riskLoading}
               />
               <RiskRow
                 severity="elevated"
-                count={riskData?.summary.elevated ?? 0}
+                count={riskData?.summary?.elevated ?? 0}
                 loading={riskLoading}
               />
               <RiskRow
                 severity="moderate"
-                count={riskData?.summary.moderate ?? 0}
+                count={riskData?.summary?.moderate ?? 0}
                 loading={riskLoading}
               />
               <RiskRow
                 severity="low"
-                count={riskData?.summary.low ?? 0}
+                count={riskData?.summary?.low ?? 0}
                 loading={riskLoading}
               />
             </div>
@@ -277,12 +277,12 @@ export default function Dashboard() {
                   </div>
                 </div>
               ))
-            ) : riskData?.recentChanges.length === 0 ? (
+            ) : riskData?.recentChanges?.length === 0 ? (
               <div className="p-6 text-center text-slate-500">
                 No recent risk changes
               </div>
             ) : (
-              riskData?.recentChanges.slice(0, 10).map((change, i) => (
+              riskData?.recentChanges?.slice(0, 10).map((change, i) => (
                 <div key={i} className="p-4 flex items-center gap-4">
                   <div className="h-8 w-8 rounded-full bg-primary-100 flex items-center justify-center">
                     <AlertTriangle className="h-4 w-4 text-primary-600" />

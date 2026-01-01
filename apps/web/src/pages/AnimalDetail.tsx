@@ -96,7 +96,7 @@ export default function AnimalDetail() {
     );
   }
 
-  const primaryPhoto = animal.media.find((m) => m.isPrimary) || animal.media[0];
+  const primaryPhoto = animal.media?.find((m) => m.isPrimary) || animal.media?.[0];
 
   return (
     <>
@@ -247,13 +247,13 @@ export default function AnimalDetail() {
             </div>
 
             {/* Risk factors */}
-            {animal.riskProfile.riskReasons.length > 0 && (
+            {animal.riskProfile.riskReasons?.length > 0 && (
               <div>
                 <h3 className="text-sm font-medium text-slate-700 mb-2">
                   Risk Factors
                 </h3>
                 <ul className="space-y-1">
-                  {animal.riskProfile.riskReasons.map((reason) => (
+                  {animal.riskProfile.riskReasons?.map((reason) => (
                     <li
                       key={reason}
                       className="text-sm text-slate-600 flex items-center gap-2"
@@ -296,14 +296,14 @@ export default function AnimalDetail() {
         )}
 
         {/* Notes */}
-        {animal.notes.length > 0 && (
+        {animal.notes?.length > 0 && (
           <div className="card">
             <div className="card-header flex items-center justify-between">
               <h2 className="font-semibold text-slate-900">Notes</h2>
               <button className="btn btn-ghost btn-sm">Add Note</button>
             </div>
             <div className="divide-y divide-slate-100">
-              {animal.notes.map((note) => (
+              {animal.notes?.map((note) => (
                 <div key={note.id} className="p-4">
                   <p className="text-slate-600">{note.content}</p>
                   <p className="text-xs text-slate-400 mt-2">

@@ -89,23 +89,29 @@ async function registerRoutes() {
   await app.register(healthRoutes, { prefix: '/api' });
   await app.register(healthRoutes, { prefix: '/' }); // Also at root
 
-  // Auth routes
+  // Auth routes (both /api/auth and /auth for compatibility)
   await app.register(authRoutes, { prefix: '/api/auth' });
+  await app.register(authRoutes, { prefix: '/auth' });
 
   // Animal routes (public read, auth write)
   await app.register(animalRoutes, { prefix: '/api/animals' });
+  await app.register(animalRoutes, { prefix: '/animals' });
 
   // Organization routes (includes join requests)
   await app.register(organizationRoutes, { prefix: '/api/organizations' });
+  await app.register(organizationRoutes, { prefix: '/organizations' });
 
   // Transfer routes
   await app.register(transferRoutes, { prefix: '/api/transfers' });
+  await app.register(transferRoutes, { prefix: '/transfers' });
 
   // Risk routes
   await app.register(riskRoutes, { prefix: '/api/risk' });
+  await app.register(riskRoutes, { prefix: '/risk' });
 
   // Data export/import routes
   await app.register(dataRoutes, { prefix: '/api/data' });
+  await app.register(dataRoutes, { prefix: '/data' });
 }
 
 // Error handler

@@ -22,13 +22,19 @@ interface LoginResponse {
     id: string;
     email: string;
     name: string;
-    role: string;
-    organizationId: string;
-    organizationName: string;
-    organizationSlug: string;
+    globalRole: string;
+    phone?: string;
+    avatarUrl?: string;
+    organizations: Array<{
+      id: string;
+      name: string;
+      slug: string;
+      role: string;
+      isPrimary: boolean;
+    }>;
   };
-  accessToken: string;
-  refreshToken: string;
+  token: string;
+  expiresIn: number;
 }
 
 export default function Login() {
@@ -57,8 +63,8 @@ export default function Login() {
       if (response.success && response.data) {
         login(
           response.data.user,
-          response.data.accessToken,
-          response.data.refreshToken
+          response.data.token,
+          '' // No refresh token in prototype
         );
         toast.success('Welcome back!');
         navigate(from, { replace: true });

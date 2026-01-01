@@ -6,13 +6,12 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@shelter-link/database';
 import { NotFoundError, ForbiddenError, ValidationError } from '../lib/errors.js';
 import { createLogger } from '../lib/logger.js';
 import { optionalAuth, requireAuth, requireSuperAdmin, requirePermission } from '../middleware/auth.js';
 
 const logger = createLogger('organizations');
-const prisma = new PrismaClient();
 
 // Schemas
 const searchSchema = z.object({
@@ -140,6 +139,99 @@ export async function organizationRoutes(app: FastifyInstance) {
         pageSize: params.pageSize,
         totalItems: total,
         totalPages: Math.ceil(total / params.pageSize),
+      },
+    };
+  });
+
+  /**
+   * GET /organizations/current/stats
+   * Get current user's organization statistics
+   */
+  app.get('/current/stats', {
+    preHandler: [requireAuth()],
+  }, async (request, reply) => {
+    const user = request.user!;
+    const orgId = user.organizationId;
+    
+    // Superadmin gets aggregate stats
+    if (user.globalRole === 'SUPERADMIN') {
+      const allAnimals = await prisma.animal.findMany({
+        include: { riskProfile: true },
+      });
+      
+      const bySeverity = { CRITICAL: 0, HIGH: 0, ELEVATED: 0, MODERATE: 0, LOW: 0 };
+      for (const animal of allAnimals) {
+        const severity = animal.riskProfile?.riskSeverity as keyof typeof bySeverity;
+        if (severity) bySeverity[severity]++;
+      }
+      
+      return {
+        success: true,
+        data: {
+          organizationName: 'All Organizations (Superadmin)',
+          totalAnimals: allAnimals.length,
+          status: {
+            available: allAnimals.filter(a => a.status === 'AVAILABLE').length,
+            medical: allAnimals.filter(a => a.status === 'MEDICAL_HOLD').length,
+            behavioral: allAnimals.filter(a => a.status === 'BEHAVIORAL_HOLD').length,
+            transferred: allAnimals.filter(a => a.status === 'TRANSFER_PENDING').length,
+          },
+          riskSummary: bySeverity,
+          capacity: {
+            current: allAnimals.filter(a => ['AVAILABLE', 'MEDICAL_HOLD', 'BEHAVIORAL_HOLD'].includes(a.status)).length,
+            total: null,
+          },
+        },
+      };
+    }
+    
+    // Regular staff gets their org stats
+    if (!orgId) {
+      return reply.status(403).send({
+        success: false,
+        error: 'No organization assigned',
+      });
+    }
+    
+    const org = await prisma.organization.findUnique({
+      where: { id: orgId },
+      include: {
+        animals: {
+          include: { riskProfile: true },
+        },
+      },
+    });
+    
+    if (!org) {
+      return reply.status(404).send({
+        success: false,
+        error: 'Organization not found',
+      });
+    }
+    
+    const bySeverity = { CRITICAL: 0, HIGH: 0, ELEVATED: 0, MODERATE: 0, LOW: 0 };
+    for (const animal of org.animals) {
+      const severity = animal.riskProfile?.riskSeverity as keyof typeof bySeverity;
+      if (severity) bySeverity[severity]++;
+    }
+    
+    return {
+      success: true,
+      data: {
+        organizationName: org.name,
+        organizationSlug: org.slug,
+        totalAnimals: org.animals.length,
+        status: {
+          available: org.animals.filter(a => a.status === 'AVAILABLE').length,
+          medical: org.animals.filter(a => a.status === 'MEDICAL_HOLD').length,
+          behavioral: org.animals.filter(a => a.status === 'BEHAVIORAL_HOLD').length,
+          transferred: org.animals.filter(a => a.status === 'TRANSFER_PENDING').length,
+        },
+        riskSummary: bySeverity,
+        capacity: {
+          current: org.animals.filter(a => ['AVAILABLE', 'MEDICAL_HOLD', 'BEHAVIORAL_HOLD'].includes(a.status)).length,
+          total: org.capacity,
+        },
       },
     };
   });

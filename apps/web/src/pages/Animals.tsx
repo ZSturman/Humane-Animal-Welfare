@@ -10,6 +10,7 @@ import {
   PawPrint,
   ChevronDown,
   X,
+  Globe,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import RiskSeverityBadge from '@/components/risk/RiskSeverityBadge';

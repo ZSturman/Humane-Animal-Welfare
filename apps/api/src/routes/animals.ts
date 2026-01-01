@@ -53,6 +53,7 @@ const searchSchema = z.object({
   ageCategory: z.string().optional(),
   status: z.string().optional(),
   organizationId: z.string().optional(),
+  allOrganizations: z.coerce.boolean().optional(),
   city: z.string().optional(),
   state: z.string().optional(),
   minUrgencyScore: z.coerce.number().int().min(0).max(100).optional(),
@@ -127,6 +128,7 @@ export async function animalRoutes(app: FastifyInstance) {
           city: { type: 'string' },
           state: { type: 'string' },
           q: { type: 'string' },
+          allOrganizations: { type: 'boolean' },
         },
       },
     },
@@ -149,8 +151,8 @@ export async function animalRoutes(app: FastifyInstance) {
       }
     }
 
-    // Organization filter
-    if (params.organizationId) {
+    // Organization filter - only apply if NOT viewing all organizations
+    if (!params.allOrganizations && params.organizationId) {
       where.organizationId = params.organizationId;
     }
     
@@ -289,6 +291,67 @@ export async function animalRoutes(app: FastifyInstance) {
         hasNextPage: params.page * params.pageSize < total,
         hasPreviousPage: params.page > 1,
       },
+    };
+  });
+
+  /**
+   * Get at-risk animals - PUBLIC (shows risk levels)
+   * NOTE: This must be defined BEFORE /:id to prevent 'at-risk' being matched as an animal ID
+   */
+  app.get('/at-risk', {
+    preHandler: [optionalAuth()],
+    schema: {
+      description: 'Get animals at elevated risk',
+      tags: ['Animals', 'Risk'],
+    },
+  }, async (request, reply) => {
+    const { organizationId } = request.query as { organizationId?: string };
+
+    const where: any = {
+      isPublic: true,
+      status: { in: ['IN_SHELTER', 'IN_FOSTER', 'IN_MEDICAL', 'AVAILABLE'] },
+      riskProfile: {
+        urgencyScore: { gte: 60 },
+      },
+    };
+
+    if (organizationId) {
+      where.organizationId = organizationId;
+    }
+
+    const animals = await prisma.animal.findMany({
+      where,
+      include: {
+        organization: {
+          select: { id: true, name: true, slug: true, city: true, state: true },
+        },
+        riskProfile: true,
+        photos: {
+          where: { isThumbnail: true },
+          take: 1,
+        },
+      },
+      orderBy: { riskProfile: { urgencyScore: 'desc' } },
+      take: 50,
+    });
+
+    return {
+      success: true,
+      data: animals.map(a => ({
+        id: a.id,
+        name: a.name,
+        species: a.species,
+        breedDisplay: a.breedSecondary ? `${a.breedPrimary} / ${a.breedSecondary} Mix` : a.breedPrimary,
+        ageCategory: a.ageCategory,
+        daysInShelter: a.daysInShelter,
+        organization: a.organization,
+        thumbnailUrl: a.photos[0] ? `/uploads/${a.id}/${a.photos[0].filename}` : null,
+        risk: a.riskProfile ? {
+          score: a.riskProfile.urgencyScore,
+          severity: a.riskProfile.riskSeverity,
+          reasons: JSON.parse(a.riskProfile.riskReasons as string || '[]'),
+        } : null,
+      })),
     };
   });
 
@@ -748,65 +811,5 @@ export async function animalRoutes(app: FastifyInstance) {
     await prisma.animalPhoto.delete({ where: { id: photoId } });
 
     return { success: true };
-  });
-
-  /**
-   * Get at-risk animals - PUBLIC (shows risk levels)
-   */
-  app.get('/at-risk', {
-    preHandler: [optionalAuth()],
-    schema: {
-      description: 'Get animals at elevated risk',
-      tags: ['Animals', 'Risk'],
-    },
-  }, async (request, reply) => {
-    const { organizationId } = request.query as { organizationId?: string };
-
-    const where: any = {
-      isPublic: true,
-      status: { in: ['IN_SHELTER', 'IN_FOSTER', 'IN_MEDICAL', 'AVAILABLE'] },
-      riskProfile: {
-        urgencyScore: { gte: 60 },
-      },
-    };
-
-    if (organizationId) {
-      where.organizationId = organizationId;
-    }
-
-    const animals = await prisma.animal.findMany({
-      where,
-      include: {
-        organization: {
-          select: { id: true, name: true, slug: true, city: true, state: true },
-        },
-        riskProfile: true,
-        photos: {
-          where: { isThumbnail: true },
-          take: 1,
-        },
-      },
-      orderBy: { riskProfile: { urgencyScore: 'desc' } },
-      take: 50,
-    });
-
-    return {
-      success: true,
-      data: animals.map(a => ({
-        id: a.id,
-        name: a.name,
-        species: a.species,
-        breedDisplay: a.breedSecondary ? `${a.breedPrimary} / ${a.breedSecondary} Mix` : a.breedPrimary,
-        ageCategory: a.ageCategory,
-        daysInShelter: a.daysInShelter,
-        organization: a.organization,
-        thumbnailUrl: a.photos[0] ? `/uploads/${a.id}/${a.photos[0].filename}` : null,
-        risk: a.riskProfile ? {
-          score: a.riskProfile.urgencyScore,
-          severity: a.riskProfile.riskSeverity,
-          reasons: JSON.parse(a.riskProfile.riskReasons as string || '[]'),
-        } : null,
-      })),
-    };
   });
 }

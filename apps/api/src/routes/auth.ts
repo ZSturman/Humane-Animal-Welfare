@@ -15,12 +15,11 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@shelter-link/database';
 import { UnauthorizedError } from '../lib/errors.js';
 import { createLogger } from '../lib/logger.js';
 
 const logger = createLogger('auth');
-const prisma = new PrismaClient();
 
 // Validation schemas
 const loginSchema = z.object({

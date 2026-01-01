@@ -8,6 +8,7 @@ import OfflineBanner from '@/components/common/OfflineBanner';
 // Lazy load pages for code splitting
 const Dashboard = lazy(() => import('@/pages/Dashboard'));
 const Animals = lazy(() => import('@/pages/Animals'));
+const AddAnimal = lazy(() => import('@/pages/AddAnimal'));
 const AnimalDetail = lazy(() => import('@/pages/AnimalDetail'));
 const AtRisk = lazy(() => import('@/pages/AtRisk'));
 const Transfers = lazy(() => import('@/pages/Transfers'));
@@ -65,6 +66,7 @@ export default function App() {
           >
             <Route index element={<Dashboard />} />
             <Route path="animals" element={<Animals />} />
+            <Route path="animals/new" element={<AddAnimal />} />
             <Route path="animals/:id" element={<AnimalDetail />} />
             <Route path="at-risk" element={<AtRisk />} />
             <Route path="transfers" element={<Transfers />} />
